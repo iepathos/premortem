@@ -11,6 +11,7 @@ use stillwater::Validation;
 use crate::env::{ConfigEnv, RealEnv};
 use crate::error::{ConfigError, ConfigErrors};
 use crate::source::{merge_config_values, ConfigValues, Source};
+use crate::trace::{TraceBuilder, TracedConfig};
 use crate::validate::Validate;
 
 /// Wrapper around a validated configuration value.
@@ -153,6 +154,96 @@ impl<T> ConfigBuilder<T> {
 
         match validation_result {
             Validation::Success(()) => Ok(Config::new(config)),
+            Validation::Failure(errors) => Err(errors),
+        }
+    }
+
+    /// Build the configuration with value tracing enabled.
+    ///
+    /// This is like `build()` but also collects tracing information
+    /// showing where each configuration value came from and its
+    /// override history across sources.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let traced = Config::<AppConfig>::builder()
+    ///     .source(Defaults::from(AppConfig::default()))
+    ///     .source(Toml::file("config.toml"))
+    ///     .source(Env::prefix("APP_"))
+    ///     .build_traced()?;
+    ///
+    /// // Check where a value came from
+    /// if let Some(trace) = traced.trace("database.host") {
+    ///     println!("From: {}", trace.final_value.source);
+    /// }
+    ///
+    /// // Generate a debug report
+    /// println!("{}", traced.trace_report());
+    /// ```
+    pub fn build_traced(self) -> Result<TracedConfig<T>, ConfigErrors>
+    where
+        T: DeserializeOwned + Validate,
+    {
+        self.build_traced_with_env(&RealEnv::new())
+    }
+
+    /// Build the configuration with tracing using a custom environment.
+    ///
+    /// This enables dependency injection for testing traced builds.
+    pub fn build_traced_with_env(self, env: &dyn ConfigEnv) -> Result<TracedConfig<T>, ConfigErrors>
+    where
+        T: DeserializeOwned + Validate,
+    {
+        // Check for empty sources first (pure validation)
+        if self.sources.is_empty() {
+            return Err(ConfigErrors::single(ConfigError::NoSources));
+        }
+
+        // Collect source names for error messages
+        let source_names: Vec<String> = self.sources.iter().map(|s| s.name().to_string()).collect();
+
+        // Load from all sources, accumulating errors and trace data
+        let mut all_values = Vec::with_capacity(self.sources.len());
+        let mut all_errors = Vec::new();
+        let mut trace_builder = TraceBuilder::new();
+
+        for source in &self.sources {
+            match source.load(env) {
+                Ok(values) => {
+                    // Record trace data for each value
+                    for (path, config_value) in values.iter() {
+                        trace_builder.add_value(
+                            path.clone(),
+                            config_value.value.clone(),
+                            config_value.source.clone(),
+                        );
+                    }
+                    all_values.push(values);
+                }
+                Err(errors) => all_errors.extend(errors.into_iter()),
+            }
+        }
+
+        // If any source failed, return all errors
+        if !all_errors.is_empty() {
+            return Err(ConfigErrors::from_vec(all_errors).unwrap());
+        }
+
+        // Merge all values (pure function)
+        let merged = merge_config_values(all_values);
+
+        // Deserialize (pure function)
+        let config = deserialize_config::<T>(&merged, &source_names)?;
+
+        // Validate (pure function)
+        let validation_result = config.validate();
+
+        match validation_result {
+            Validation::Success(()) => {
+                let traces = trace_builder.build();
+                Ok(TracedConfig::new(Config::new(config), traces))
+            }
             Validation::Failure(errors) => Err(errors),
         }
     }
@@ -430,5 +521,231 @@ mod tests {
                 ConfigError::MissingField { path, .. } if path == "port"
             ));
         }
+    }
+
+    // ========== build_traced() tests ==========
+
+    #[test]
+    fn test_build_traced_single_source() {
+        let source = StaticSource::new("test")
+            .with_value("host", "localhost")
+            .with_value("port", 8080i64);
+
+        let env = MockEnv::new();
+        let result = Config::<SimpleConfig>::builder()
+            .source(source)
+            .build_traced_with_env(&env);
+
+        assert!(result.is_ok());
+        let traced = result.unwrap();
+
+        // Check config values
+        assert_eq!(traced.host, "localhost");
+        assert_eq!(traced.port, 8080);
+
+        // Check traces exist
+        assert!(traced.trace("host").is_some());
+        assert!(traced.trace("port").is_some());
+
+        // Single source means no overrides
+        assert!(!traced.was_overridden("host"));
+        assert!(!traced.was_overridden("port"));
+    }
+
+    #[test]
+    fn test_build_traced_multiple_sources_with_override() {
+        let source1 = StaticSource::new("defaults")
+            .with_value("host", "localhost")
+            .with_value("port", 8080i64);
+
+        let source2 = StaticSource::new("override").with_value("host", "production.example.com");
+
+        let env = MockEnv::new();
+        let result = Config::<SimpleConfig>::builder()
+            .source(source1)
+            .source(source2)
+            .build_traced_with_env(&env);
+
+        assert!(result.is_ok());
+        let traced = result.unwrap();
+
+        // Check final values
+        assert_eq!(traced.host, "production.example.com");
+        assert_eq!(traced.port, 8080);
+
+        // host was overridden, port was not
+        assert!(traced.was_overridden("host"));
+        assert!(!traced.was_overridden("port"));
+
+        // Check trace history for host
+        let host_trace = traced.trace("host").unwrap();
+        assert_eq!(host_trace.history.len(), 2);
+        assert_eq!(
+            host_trace.final_value.value.as_str(),
+            Some("production.example.com")
+        );
+        assert_eq!(host_trace.final_value.source.source, "override");
+    }
+
+    #[test]
+    fn test_build_traced_trace_report() {
+        let source1 = StaticSource::new("defaults")
+            .with_value("host", "localhost")
+            .with_value("port", 8080i64);
+
+        let source2 = StaticSource::new("env").with_value("host", "prod-server");
+
+        let env = MockEnv::new();
+        let traced = Config::<SimpleConfig>::builder()
+            .source(source1)
+            .source(source2)
+            .build_traced_with_env(&env)
+            .unwrap();
+
+        let report = traced.trace_report();
+
+        // Report should contain path names
+        assert!(report.contains("host"));
+        assert!(report.contains("port"));
+
+        // Report should show sources
+        assert!(report.contains("defaults"));
+        assert!(report.contains("env"));
+
+        // Report should show override markers
+        assert!(report.contains("overridden"));
+    }
+
+    #[test]
+    fn test_build_traced_overridden_paths() {
+        let source1 = StaticSource::new("defaults")
+            .with_value("host", "localhost")
+            .with_value("port", 8080i64);
+
+        let source2 = StaticSource::new("env").with_value("host", "prod-server");
+
+        let env = MockEnv::new();
+        let traced = Config::<SimpleConfig>::builder()
+            .source(source1)
+            .source(source2)
+            .build_traced_with_env(&env)
+            .unwrap();
+
+        let overridden: Vec<&str> = traced.overridden_paths().collect();
+        assert_eq!(overridden.len(), 1);
+        assert!(overridden.contains(&"host"));
+    }
+
+    #[test]
+    fn test_build_traced_no_sources_error() {
+        let result = Config::<SimpleConfig>::builder().build_traced();
+
+        assert!(result.is_err());
+        if let Err(errors) = result {
+            assert!(matches!(errors.first(), ConfigError::NoSources));
+        }
+    }
+
+    #[test]
+    fn test_build_traced_validation_failure() {
+        let source = StaticSource::new("test").with_value("port", 70000i64);
+
+        let env = MockEnv::new();
+        let result = Config::<ValidatedConfig>::builder()
+            .source(source)
+            .build_traced_with_env(&env);
+
+        assert!(result.is_err());
+        if let Err(errors) = result {
+            assert!(matches!(
+                errors.first(),
+                ConfigError::ValidationError { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn test_build_traced_source_error() {
+        let source = FailingSource::new("bad_source");
+
+        let env = MockEnv::new();
+        let result = Config::<SimpleConfig>::builder()
+            .source(source)
+            .build_traced_with_env(&env);
+
+        assert!(result.is_err());
+        if let Err(errors) = result {
+            assert!(matches!(errors.first(), ConfigError::SourceError { .. }));
+        }
+    }
+
+    #[test]
+    fn test_build_traced_into_inner() {
+        let source = StaticSource::new("test")
+            .with_value("host", "localhost")
+            .with_value("port", 8080i64);
+
+        let env = MockEnv::new();
+        let traced = Config::<SimpleConfig>::builder()
+            .source(source)
+            .build_traced_with_env(&env)
+            .unwrap();
+
+        let inner = traced.into_inner();
+        assert_eq!(inner.host, "localhost");
+        assert_eq!(inner.port, 8080);
+    }
+
+    #[test]
+    fn test_build_traced_into_config() {
+        let source = StaticSource::new("test")
+            .with_value("host", "localhost")
+            .with_value("port", 8080i64);
+
+        let env = MockEnv::new();
+        let traced = Config::<SimpleConfig>::builder()
+            .source(source)
+            .build_traced_with_env(&env)
+            .unwrap();
+
+        let config = traced.into_config();
+        assert_eq!(config.host, "localhost");
+        assert_eq!(config.port, 8080);
+    }
+
+    #[test]
+    fn test_build_traced_three_sources() {
+        let source1 = StaticSource::new("defaults")
+            .with_value("host", "localhost")
+            .with_value("port", 80i64);
+
+        let source2 = StaticSource::new("config")
+            .with_value("host", "staging")
+            .with_value("port", 8080i64);
+
+        let source3 = StaticSource::new("env").with_value("host", "prod");
+
+        let env = MockEnv::new();
+        let traced = Config::<SimpleConfig>::builder()
+            .source(source1)
+            .source(source2)
+            .source(source3)
+            .build_traced_with_env(&env)
+            .unwrap();
+
+        // Final values
+        assert_eq!(traced.host, "prod");
+        assert_eq!(traced.port, 8080);
+
+        // host trace should have 3 entries
+        let host_trace = traced.trace("host").unwrap();
+        assert_eq!(host_trace.history.len(), 3);
+        assert_eq!(host_trace.history[0].source.source, "defaults");
+        assert_eq!(host_trace.history[1].source.source, "config");
+        assert_eq!(host_trace.history[2].source.source, "env");
+
+        // port trace should have 2 entries
+        let port_trace = traced.trace("port").unwrap();
+        assert_eq!(port_trace.history.len(), 2);
     }
 }

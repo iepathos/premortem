@@ -80,6 +80,7 @@ pub mod error;
 pub mod pretty;
 pub mod source;
 pub mod sources;
+pub mod trace;
 pub mod validate;
 pub mod value;
 
@@ -92,6 +93,7 @@ pub use error::{
 };
 pub use pretty::{ColorOption, PrettyPrintOptions, ValidationExt};
 pub use source::{merge_config_values, ConfigValues, Source};
+pub use trace::{TraceBuilder, TracedConfig, TracedValue, ValueTrace};
 pub use validate::validators;
 pub use validate::{
     custom, validate_field, validate_nested, validate_optional_nested, Validate, Validator, When,
