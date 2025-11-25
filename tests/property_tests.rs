@@ -64,23 +64,81 @@ fn arb_source_location() -> impl Strategy<Value = SourceLocation> {
         })
 }
 
-/// Generate arbitrary ConfigError values.
+/// Generate arbitrary SourceErrorKind values.
+fn arb_source_error_kind() -> impl Strategy<Value = premortem::SourceErrorKind> {
+    use premortem::SourceErrorKind;
+    prop_oneof![
+        // NotFound
+        "[a-z_/]{1,30}\\.toml".prop_map(|path| SourceErrorKind::NotFound { path }),
+        // IoError
+        "[a-zA-Z0-9 ]{1,30}".prop_map(|message| SourceErrorKind::IoError { message }),
+        // ParseError
+        (
+            "[a-zA-Z0-9 ]{1,30}",
+            proptest::option::of(1u32..1000),
+            proptest::option::of(1u32..200),
+        )
+            .prop_map(|(message, line, column)| SourceErrorKind::ParseError {
+                message,
+                line,
+                column,
+            }),
+        // ConnectionError
+        "[a-zA-Z0-9 ]{1,30}".prop_map(|message| SourceErrorKind::ConnectionError { message }),
+        // Other
+        "[a-zA-Z0-9 ]{1,30}".prop_map(|message| SourceErrorKind::Other { message }),
+    ]
+}
+
+/// Generate arbitrary ConfigError values (all 7 variants).
 fn arb_config_error() -> impl Strategy<Value = ConfigError> {
     prop_oneof![
-        // ValidationError
-        ("[a-z][a-z.]{0,20}", "[a-zA-Z0-9 ]{1,50}").prop_map(|(path, msg)| {
-            ConfigError::ValidationError {
-                path,
-                source_location: None,
-                value: None,
-                message: msg,
-            }
-        }),
+        // SourceError
+        ("[a-z_]{1,20}\\.toml", arb_source_error_kind())
+            .prop_map(|(source_name, kind)| { ConfigError::SourceError { source_name, kind } }),
+        // ParseError
+        (
+            "[a-z][a-z.]{0,20}",
+            arb_source_location(),
+            prop_oneof!["integer", "string", "boolean", "float", "array", "table"],
+            "[a-zA-Z0-9_\\-]{1,20}",
+            "[a-zA-Z0-9 ]{1,50}",
+        )
+            .prop_map(
+                |(path, source_location, expected_type, actual_value, message)| {
+                    ConfigError::ParseError {
+                        path,
+                        source_location,
+                        expected_type: expected_type.to_string(),
+                        actual_value,
+                        message,
+                    }
+                },
+            ),
         // MissingField
-        "[a-z][a-z.]{0,20}".prop_map(|path| ConfigError::MissingField {
-            path,
-            searched_sources: vec!["config.toml".to_string()],
-        }),
+        (
+            "[a-z][a-z.]{0,20}",
+            prop::collection::vec("[a-z_]{1,15}\\.toml", 1..3),
+        )
+            .prop_map(|(path, searched_sources)| ConfigError::MissingField {
+                path,
+                searched_sources,
+            }),
+        // ValidationError
+        (
+            "[a-z][a-z.]{0,20}",
+            proptest::option::of(arb_source_location()),
+            proptest::option::of("[a-zA-Z0-9_\\-]{1,20}"),
+            "[a-zA-Z0-9 ]{1,50}",
+        )
+            .prop_map(|(path, source_location, value, message)| {
+                ConfigError::ValidationError {
+                    path,
+                    source_location,
+                    value,
+                    message,
+                }
+            }),
         // CrossFieldError
         (
             prop::collection::vec("[a-z]{1,10}", 2..4),
@@ -90,6 +148,19 @@ fn arb_config_error() -> impl Strategy<Value = ConfigError> {
                 paths,
                 message: msg,
             }),
+        // UnknownField
+        (
+            "[a-z][a-z.]{0,20}",
+            arb_source_location(),
+            proptest::option::of("[a-z]{1,15}"),
+        )
+            .prop_map(
+                |(path, source_location, did_you_mean)| ConfigError::UnknownField {
+                    path,
+                    source_location,
+                    did_you_mean,
+                }
+            ),
         // NoSources
         Just(ConfigError::NoSources),
     ]
@@ -275,6 +346,7 @@ mod merge_properties {
         /// Property: Later source wins in merge.
         ///
         /// For any key in b, merge(a, b).get(k) should equal b.get(k)
+        /// This verifies both presence AND value equality.
         #[test]
         fn later_source_wins(
             a in arb_config_values(),
@@ -283,8 +355,28 @@ mod merge_properties {
             let merged = merge_config_values(vec![a, b.clone()]);
 
             for path in b.paths() {
-                // The merged value should match the later source
-                prop_assert!(merged.get(path).is_some());
+                let merged_value = merged.get(path);
+                let b_value = b.get(path);
+
+                // The merged value should exist
+                prop_assert!(
+                    merged_value.is_some(),
+                    "Path '{}' from later source should exist in merged result",
+                    path
+                );
+
+                // The merged value should equal the later source's value
+                let merged_cv = merged_value.unwrap();
+                let b_cv = b_value.unwrap();
+
+                prop_assert_eq!(
+                    &merged_cv.value,
+                    &b_cv.value,
+                    "Path '{}': merged value {:?} should equal later source value {:?}",
+                    path,
+                    &merged_cv.value,
+                    &b_cv.value
+                );
             }
         }
 
