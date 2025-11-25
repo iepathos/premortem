@@ -77,6 +77,7 @@
 pub mod config;
 pub mod env;
 pub mod error;
+pub mod pretty;
 pub mod source;
 pub mod sources;
 pub mod validate;
@@ -89,6 +90,7 @@ pub use error::{
     group_by_source, ConfigError, ConfigErrors, ConfigValidation, ConfigValidationExt,
     SourceErrorKind, SourceLocation,
 };
+pub use pretty::{ColorOption, PrettyPrintOptions, ValidationExt};
 pub use source::{merge_config_values, ConfigValues, Source};
 pub use validate::validators;
 pub use validate::{
