@@ -78,6 +78,7 @@ pub mod config;
 pub mod env;
 pub mod error;
 pub mod source;
+pub mod sources;
 pub mod validate;
 pub mod value;
 
@@ -94,6 +95,10 @@ pub use validate::{
     custom, validate_field, validate_nested, validate_optional_nested, Validate, Validator, When,
 };
 pub use value::{ConfigValue, Value};
+
+// Re-export TOML source when the feature is enabled
+#[cfg(feature = "toml")]
+pub use sources::Toml;
 
 // Re-export stillwater types that are commonly used
 pub use stillwater::{NonEmptyVec, Semigroup, Validation};
