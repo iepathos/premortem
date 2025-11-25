@@ -10,8 +10,12 @@ keywords = ["configuration", "validation", "config", "settings", "premortem"]
 categories = ["config", "rust-patterns"]
 readme = "README.md"
 
+[workspace]
+members = ["premortem-derive"]
+
 [dependencies]
 stillwater = { path = "/Users/glen/memento-mori/stillwater" }
+premortem-derive = { path = "premortem-derive", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
@@ -20,12 +24,14 @@ regex = "1.10"
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-test = "0.4"
+premortem-derive = { path = "premortem-derive" }
 
 [features]
-default = ["toml"]
+default = ["toml", "derive"]
+derive = ["premortem-derive"]
 toml = []
 json = []
 yaml = []
 watch = []
 remote = []
-full = ["toml", "json", "yaml", "watch", "remote"]
+full = ["toml", "json", "yaml", "watch", "remote", "derive"]
