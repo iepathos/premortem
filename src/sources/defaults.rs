@@ -164,6 +164,9 @@ impl Defaults<()> {
     }
 }
 
+#[cfg(feature = "watch")]
+use std::path::PathBuf;
+
 impl<T: Serialize + Clone + Send + Sync + 'static> Source for Defaults<T> {
     /// Load defaults.
     ///
@@ -182,6 +185,17 @@ impl<T: Serialize + Clone + Send + Sync + 'static> Source for Defaults<T> {
 
     fn name(&self) -> &str {
         "defaults"
+    }
+
+    #[cfg(feature = "watch")]
+    fn watch_path(&self) -> Option<PathBuf> {
+        // Defaults are not watched - they're static values
+        None
+    }
+
+    #[cfg(feature = "watch")]
+    fn clone_box(&self) -> Box<dyn Source> {
+        Box::new(self.clone())
     }
 }
 
@@ -278,6 +292,17 @@ impl Source for PartialDefaults {
 
     fn name(&self) -> &str {
         "defaults"
+    }
+
+    #[cfg(feature = "watch")]
+    fn watch_path(&self) -> Option<PathBuf> {
+        // Partial defaults are not watched - they're static values
+        None
+    }
+
+    #[cfg(feature = "watch")]
+    fn clone_box(&self) -> Box<dyn Source> {
+        Box::new(self.clone())
     }
 }
 

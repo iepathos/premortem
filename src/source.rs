@@ -170,6 +170,12 @@ pub trait Source: Send + Sync {
     fn watch_path(&self) -> Option<PathBuf> {
         None
     }
+
+    /// Clone this source into a boxed trait object.
+    ///
+    /// Required for hot reload to rebuild configuration from the same sources.
+    #[cfg(feature = "watch")]
+    fn clone_box(&self) -> Box<dyn Source>;
 }
 
 /// Pure function: merge multiple ConfigValues by priority.

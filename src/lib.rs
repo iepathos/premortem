@@ -83,6 +83,8 @@ pub mod sources;
 pub mod trace;
 pub mod validate;
 pub mod value;
+#[cfg(feature = "watch")]
+pub mod watch;
 
 // Re-exports for convenience
 pub use config::{Config, ConfigBuilder};
@@ -105,6 +107,10 @@ pub use sources::Env;
 #[cfg(feature = "toml")]
 pub use sources::Toml;
 pub use sources::{Defaults, PartialDefaults};
+
+// Re-export watch types
+#[cfg(feature = "watch")]
+pub use watch::{ConfigEvent, ConfigWatcher, WatchedConfig};
 
 // Re-export stillwater types that are commonly used
 pub use stillwater::{NonEmptyVec, Semigroup, Validation};

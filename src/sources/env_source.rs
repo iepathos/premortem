@@ -212,6 +212,9 @@ impl Env {
     }
 }
 
+#[cfg(feature = "watch")]
+use std::path::PathBuf;
+
 impl Source for Env {
     /// Load environment variables.
     ///
@@ -279,6 +282,17 @@ impl Source for Env {
 
     fn name(&self) -> &str {
         "environment"
+    }
+
+    #[cfg(feature = "watch")]
+    fn watch_path(&self) -> Option<PathBuf> {
+        // Environment variables are not watched (would require polling)
+        None
+    }
+
+    #[cfg(feature = "watch")]
+    fn clone_box(&self) -> Box<dyn Source> {
+        Box::new(self.clone())
     }
 }
 
