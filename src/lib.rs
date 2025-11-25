@@ -100,6 +100,7 @@ pub use value::{ConfigValue, Value};
 pub use sources::Env;
 #[cfg(feature = "toml")]
 pub use sources::Toml;
+pub use sources::{Defaults, PartialDefaults};
 
 // Re-export stillwater types that are commonly used
 pub use stillwater::{NonEmptyVec, Semigroup, Validation};
