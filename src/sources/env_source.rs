@@ -536,7 +536,7 @@ mod tests {
         let env = MockEnv::new()
             .with_env("APP_INT", "42")
             .with_env("APP_NEGATIVE", "-10")
-            .with_env("APP_FLOAT", "3.14")
+            .with_env("APP_FLOAT", "3.25")
             .with_env("APP_SCIENTIFIC", "1.5e10");
 
         let source = Env::prefix("APP_");
@@ -552,7 +552,7 @@ mod tests {
         );
         assert_eq!(
             values.get("float").map(|v| v.value.as_float()),
-            Some(Some(3.14))
+            Some(Some(3.25))
         );
         // Scientific notation parses as float
         let scientific = values.get("scientific").map(|v| v.value.as_float());
@@ -711,7 +711,7 @@ mod tests {
 
     #[test]
     fn test_parse_scalar_float() {
-        assert_eq!(parse_scalar("3.14"), Value::Float(3.14));
+        assert_eq!(parse_scalar("3.25"), Value::Float(3.25));
         assert_eq!(parse_scalar("-2.5"), Value::Float(-2.5));
     }
 
