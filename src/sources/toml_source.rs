@@ -473,7 +473,7 @@ mod tests {
             r#"
             string_val = "hello"
             int_val = 42
-            float_val = 3.14
+            float_val = 2.72
             bool_val = true
             date_val = 2024-01-15
             "#,
@@ -492,7 +492,7 @@ mod tests {
         );
         assert_eq!(
             values.get("float_val").map(|v| v.value.as_float()),
-            Some(Some(3.14))
+            Some(Some(2.72))
         );
         assert_eq!(
             values.get("bool_val").map(|v| v.value.as_bool()),
