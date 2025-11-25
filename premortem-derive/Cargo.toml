@@ -1,0 +1,22 @@
+[package]
+name = "premortem-derive"
+version = "0.1.0"
+edition = "2021"
+authors = ["Glen Baker <iepathos@gmail.com>"]
+license = "MIT"
+description = "Derive macros for the premortem configuration validation library"
+repository = "https://github.com/iepathos/premortem"
+keywords = ["configuration", "validation", "derive", "macro"]
+categories = ["config", "rust-patterns"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+
+[dev-dependencies]
+premortem = { path = ".." }
+stillwater = { path = "/Users/glen/memento-mori/stillwater" }

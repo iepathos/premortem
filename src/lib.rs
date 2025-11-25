@@ -98,6 +98,10 @@ pub use value::{ConfigValue, Value};
 // Re-export stillwater types that are commonly used
 pub use stillwater::{NonEmptyVec, Semigroup, Validation};
 
+// Re-export derive macro when the feature is enabled
+#[cfg(feature = "derive")]
+pub use premortem_derive::Validate as DeriveValidate;
+
 #[cfg(test)]
 mod tests {
     use super::*;
