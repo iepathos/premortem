@@ -4,7 +4,7 @@ title: Environment Variable Source
 category: storage
 priority: high
 status: draft
-dependencies: [1, 2]
+dependencies: [1, 2, 12]
 created: 2025-11-25
 ---
 
@@ -13,7 +13,7 @@ created: 2025-11-25
 **Category**: storage
 **Priority**: high
 **Status**: draft
-**Dependencies**: [001 - Core Config Builder, 002 - Error Types]
+**Dependencies**: [001 - Core Config Builder, 002 - Error Types, 012 - ConfigEnv Trait]
 
 ## Context
 
@@ -21,16 +21,16 @@ Environment variables are the standard way to configure applications in producti
 
 ### Stillwater Pattern
 
-Like TOML source, Env implements the Source trait with Effect-based loading:
+Like TOML source, Env implements the Source trait with Effect-based loading and ConfigEnv injection:
 
 ```rust
-fn load(&self) -> Effect<ConfigValues, ConfigErrors, ()>
+fn load<E: ConfigEnv>(&self) -> Effect<ConfigValues, ConfigErrors, E>
 ```
 
-While `std::env::vars()` is technically I/O, it's:
-- Fast and synchronous
-- Always available (no file system errors)
-- No parse errors possible (just key-value strings)
+While environment variable access is simple I/O, using `ConfigEnv`:
+- **Enables testing** - MockEnv can provide controlled env vars
+- **Maintains consistency** - Same pattern as file sources
+- **Isolates tests** - No global state pollution between tests
 
 The transformation from env vars to ConfigValues is pure.
 
@@ -167,59 +167,134 @@ impl Env {
 }
 ```
 
-### Source Implementation
+### Source Implementation (Effect-based with ConfigEnv)
 
 ```rust
+use stillwater::Effect;
+use crate::env::ConfigEnv;
+use crate::error::ConfigErrors;
+
 impl Source for Env {
-    fn load(&self) -> Validation<ConfigValues, Vec<ConfigError>> {
-        let mut values = ConfigValues::new();
-        let prefix_lower = self.prefix.to_lowercase();
+    /// Load environment variables using ConfigEnv for testability.
+    ///
+    /// # Stillwater Pattern
+    ///
+    /// Uses Effect with ConfigEnv to enable MockEnv injection:
+    /// - Production: RealEnv reads from std::env
+    /// - Testing: MockEnv provides controlled values
+    fn load<E: ConfigEnv>(&self) -> Effect<ConfigValues, ConfigErrors, E> {
+        let prefix = self.prefix.clone();
+        let separator = self.separator.clone();
+        let case_sensitive = self.case_sensitive;
+        let list_separator = self.list_separator.clone();
+        let custom_mappings = self.custom_mappings.clone();
+        let excluded = self.excluded.clone();
 
-        for (key, value) in std::env::vars() {
-            // Check prefix match
-            let key_check = if self.case_sensitive {
-                key.clone()
+        Effect::from_fn(move |env: &E| {
+            let mut values = ConfigValues::new();
+            let prefix_lower = prefix.to_lowercase();
+
+            // Get env vars through ConfigEnv (mockable!)
+            let env_vars = if prefix.is_empty() {
+                env.all_env_vars()
             } else {
-                key.to_lowercase()
+                env.env_vars_with_prefix(&prefix)
             };
 
-            if !key_check.starts_with(&prefix_lower) {
-                continue;
+            for (key, value) in env_vars {
+                // Check prefix match
+                let key_check = if case_sensitive {
+                    key.clone()
+                } else {
+                    key.to_lowercase()
+                };
+
+                if !key_check.starts_with(&prefix_lower) {
+                    continue;
+                }
+
+                // Check exclusions
+                if excluded.contains(&key) {
+                    continue;
+                }
+
+                // Get suffix after prefix
+                let suffix = &key[prefix.len()..];
+
+                // Check for custom mapping
+                let path = if let Some(mapped) = custom_mappings.get(suffix) {
+                    mapped.clone()
+                } else {
+                    // Convert suffix to config path
+                    suffix_to_path(suffix, &separator)
+                };
+
+                // Parse value (pure function)
+                let parsed_value = parse_env_value(&value, list_separator.as_deref());
+
+                // Store with source location
+                let source = SourceLocation::env(&key);
+                values.insert(path, ConfigValue {
+                    value: parsed_value,
+                    source,
+                });
             }
 
-            // Check exclusions
-            if self.excluded.contains(&key) {
-                continue;
-            }
-
-            // Get suffix after prefix
-            let suffix = &key[self.prefix.len()..];
-
-            // Check for custom mapping
-            let path = if let Some(mapped) = self.custom_mappings.get(suffix) {
-                mapped.clone()
-            } else {
-                // Convert suffix to config path
-                self.suffix_to_path(suffix)
-            };
-
-            // Parse value
-            let parsed_value = self.parse_value(&value);
-
-            // Store with source location
-            let source = SourceLocation::env(&key);
-            values.insert(path, ConfigValue {
-                value: parsed_value,
-                source,
-            });
-        }
-
-        Validation::success(values)
+            Ok(values)
+        })
     }
 
     fn name(&self) -> &str {
         "environment"
     }
+}
+
+/// Pure function: convert env var suffix to config path
+fn suffix_to_path(suffix: &str, separator: &str) -> String {
+    suffix
+        .split(separator)
+        .map(|part| part.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// Pure function: parse environment variable value
+fn parse_env_value(value: &str, list_separator: Option<&str>) -> Value {
+    // Check for list
+    if let Some(sep) = list_separator {
+        if value.contains(sep) {
+            let items: Vec<Value> = value
+                .split(sep)
+                .map(|s| parse_scalar(s.trim()))
+                .collect();
+            return Value::Array(items);
+        }
+    }
+
+    parse_scalar(value)
+}
+
+/// Pure function: parse scalar value with type inference
+fn parse_scalar(value: &str) -> Value {
+    // Try boolean
+    match value.to_lowercase().as_str() {
+        "true" | "yes" | "1" | "on" => return Value::Bool(true),
+        "false" | "no" | "0" | "off" => return Value::Bool(false),
+        _ => {}
+    }
+
+    // Try integer
+    if let Ok(i) = value.parse::<i64>() {
+        return Value::Integer(i);
+    }
+
+    // Try float
+    if let Ok(f) = value.parse::<f64>() {
+        return Value::Float(f);
+    }
+
+    // Keep as string
+    Value::String(value.to_string())
 }
 ```
 

@@ -121,21 +121,33 @@ impl Default for PrettyPrintOptions {
 ### Pretty Print Implementation
 
 ```rust
-impl ConfigError {
-    /// Pretty print a slice of errors to stderr
-    pub fn pretty_print(errors: &[ConfigError], options: PrettyPrintOptions) {
+use crate::error::ConfigErrors;
+
+impl ConfigErrors {
+    /// Pretty print errors to stderr.
+    ///
+    /// # Stillwater Integration
+    ///
+    /// `ConfigErrors` wraps `NonEmptyVec<ConfigError>`, guaranteeing at least
+    /// one error exists. This eliminates empty-error-list edge cases.
+    pub fn pretty_print(&self, options: PrettyPrintOptions) {
         let printer = ErrorPrinter::new(options);
-        printer.print(errors);
+        printer.print(self.as_slice());
     }
 
-    /// Pretty print to a string (for testing)
-    pub fn format(errors: &[ConfigError], options: PrettyPrintOptions) -> String {
+    /// Pretty print to a string (for testing).
+    pub fn format(&self, options: PrettyPrintOptions) -> String {
         let mut buf = Vec::new();
         let mut options = options;
         options.writer = Box::new(&mut buf);
         let printer = ErrorPrinter::new(options);
-        printer.print(errors);
+        printer.print(self.as_slice());
         String::from_utf8(buf).unwrap_or_default()
+    }
+
+    /// Pretty print with default options.
+    pub fn pretty_print_default(&self) {
+        self.pretty_print(PrettyPrintOptions::default());
     }
 }
 
@@ -335,16 +347,36 @@ Hints:
 ### Convenience Methods
 
 ```rust
-/// Trait extension for easy error handling
-pub trait ValidationExt<T, E> {
-    /// Unwrap or pretty print errors and exit
+use stillwater::Validation;
+use crate::error::{ConfigErrors, ConfigValidation};
+
+/// Trait extension for easy error handling.
+///
+/// # Stillwater Integration
+///
+/// Works with `ConfigValidation<T>` (alias for `Validation<T, ConfigErrors>`).
+/// Uses `ConfigErrors` (NonEmptyVec wrapper) for type-safe error handling.
+pub trait ValidationExt<T> {
+    /// Unwrap or pretty print errors and exit with code 1.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let config = Config::<AppConfig>::builder()
+    ///     .source(Toml::file("config.toml"))
+    ///     .build()
+    ///     .unwrap_or_exit();  // Prints all errors and exits if validation fails
+    /// ```
     fn unwrap_or_exit(self) -> T;
 
-    /// Unwrap or pretty print errors and exit with custom options
+    /// Unwrap or pretty print errors with custom options and exit.
     fn unwrap_or_exit_with(self, options: PrettyPrintOptions) -> T;
+
+    /// Convert to Result, pretty printing on error but not exiting.
+    fn unwrap_or_print(self) -> Result<T, ConfigErrors>;
 }
 
-impl<T> ValidationExt<T, Vec<ConfigError>> for Validation<T, Vec<ConfigError>> {
+impl<T> ValidationExt<T> for ConfigValidation<T> {
     fn unwrap_or_exit(self) -> T {
         self.unwrap_or_exit_with(PrettyPrintOptions::default())
     }
@@ -353,8 +385,18 @@ impl<T> ValidationExt<T, Vec<ConfigError>> for Validation<T, Vec<ConfigError>> {
         match self {
             Validation::Success(value) => value,
             Validation::Failure(errors) => {
-                ConfigError::pretty_print(&errors, options);
+                errors.pretty_print(options);
                 std::process::exit(1);
+            }
+        }
+    }
+
+    fn unwrap_or_print(self) -> Result<T, ConfigErrors> {
+        match self {
+            Validation::Success(value) => Ok(value),
+            Validation::Failure(errors) => {
+                errors.pretty_print_default();
+                Err(errors)
             }
         }
     }

@@ -4,7 +4,7 @@ title: TOML File Source
 category: storage
 priority: high
 status: draft
-dependencies: [1, 2]
+dependencies: [1, 2, 12]
 created: 2025-11-25
 ---
 
@@ -13,7 +13,7 @@ created: 2025-11-25
 **Category**: storage
 **Priority**: high
 **Status**: draft
-**Dependencies**: [001 - Core Config Builder, 002 - Error Types]
+**Dependencies**: [001 - Core Config Builder, 002 - Error Types, 012 - ConfigEnv Trait]
 
 ## Context
 
@@ -133,29 +133,37 @@ impl Toml {
 }
 ```
 
-### Source Implementation (Effect-based)
+### Source Implementation (Effect-based with ConfigEnv)
 
 ```rust
-use stillwater::{Effect, IO};
+use stillwater::Effect;
+use crate::env::ConfigEnv;
 use crate::error::{ConfigError, ConfigErrors, SourceErrorKind};
 use crate::source::{ConfigValues, Source};
 
 impl Source for Toml {
     /// Load TOML configuration wrapped in Effect.
     ///
-    /// File I/O is wrapped in Effect, keeping it at the boundary.
-    /// Parsing is pure and happens after the Effect executes.
-    fn load(&self) -> Effect<ConfigValues, ConfigErrors, ()> {
+    /// File I/O is performed through the `ConfigEnv` trait, enabling
+    /// dependency injection for testing. Parsing is pure and happens
+    /// after the I/O completes.
+    ///
+    /// # Stillwater Pattern
+    ///
+    /// - `Effect<T, E, Env>` defers I/O until `run()` is called
+    /// - `ConfigEnv` parameter enables `MockEnv` injection for tests
+    /// - Parsing remains pure (no I/O in `parse_toml`)
+    fn load<E: ConfigEnv>(&self) -> Effect<ConfigValues, ConfigErrors, E> {
         let source = self.source.clone();
         let required = self.required;
         let custom_name = self.name.clone();
 
-        // Wrap file I/O in Effect
-        Effect::from_fn(move |_: &()| {
+        // Wrap I/O in Effect with environment injection
+        Effect::from_fn(move |env: &E| {
             let (content, source_name) = match &source {
                 TomlSource::File(path) => {
-                    // I/O happens here, inside the Effect
-                    match std::fs::read_to_string(path) {
+                    // I/O through injected ConfigEnv (mockable!)
+                    match env.read_file(path) {
                         Ok(content) => {
                             let name = custom_name.clone()
                                 .unwrap_or_else(|| path.display().to_string());
@@ -185,7 +193,7 @@ impl Source for Toml {
                     }
                 }
                 TomlSource::String { content, name } => {
-                    // String content - no I/O, but still wrapped for consistency
+                    // String content - no I/O needed
                     (content.clone(), custom_name.clone().unwrap_or_else(|| name.clone()))
                 }
             };

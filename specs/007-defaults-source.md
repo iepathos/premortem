@@ -4,7 +4,7 @@ title: Defaults Source
 category: storage
 priority: medium
 status: draft
-dependencies: [1, 2]
+dependencies: [1, 2, 12]
 created: 2025-11-25
 ---
 
@@ -13,7 +13,7 @@ created: 2025-11-25
 **Category**: storage
 **Priority**: medium
 **Status**: draft
-**Dependencies**: [001 - Core Config Builder, 002 - Error Types]
+**Dependencies**: [001 - Core Config Builder, 002 - Error Types, 012 - ConfigEnv Trait]
 
 ## Context
 
@@ -157,22 +157,37 @@ impl Defaults<()> {
 }
 ```
 
-### Source Implementation
+### Source Implementation (Effect-based)
 
 ```rust
-impl<T: Serialize + Send + Sync> Source for Defaults<T> {
-    fn load(&self) -> Validation<ConfigValues, Vec<ConfigError>> {
-        match &self.source {
-            DefaultsSource::Value(value) => serialize_to_config_values(value, "defaults"),
-            DefaultsSource::Fn(f) => {
-                let value = f();
-                serialize_to_config_values(&value, "defaults")
+use stillwater::Effect;
+use crate::env::ConfigEnv;
+use crate::error::{ConfigError, ConfigErrors, SourceErrorKind};
+
+impl<T: Serialize + Send + Sync + Clone> Source for Defaults<T> {
+    /// Load defaults as an Effect.
+    ///
+    /// # Note on ConfigEnv
+    ///
+    /// Defaults have no I/O, so ConfigEnv is unused. The Effect pattern
+    /// is used for API consistency with other sources.
+    fn load<E: ConfigEnv>(&self) -> Effect<ConfigValues, ConfigErrors, E> {
+        let source = self.source.clone();
+
+        Effect::from_fn(move |_env: &E| {
+            // No I/O needed - pure serialization
+            match &source {
+                DefaultsSource::Value(value) => serialize_to_config_values(value, "defaults"),
+                DefaultsSource::Fn(f) => {
+                    let value = f();
+                    serialize_to_config_values(&value, "defaults")
+                }
+                DefaultsSource::Partial(_) => {
+                    // Partial defaults handled by PartialDefaults impl
+                    unreachable!()
+                }
             }
-            DefaultsSource::Partial(partial) => {
-                // Partial defaults handled separately
-                unreachable!()
-            }
-        }
+        })
     }
 
     fn name(&self) -> &str {
@@ -181,20 +196,27 @@ impl<T: Serialize + Send + Sync> Source for Defaults<T> {
 }
 
 impl Source for PartialDefaults {
-    fn load(&self) -> Validation<ConfigValues, Vec<ConfigError>> {
-        let mut config_values = ConfigValues::new();
+    /// Load partial defaults as an Effect.
+    ///
+    /// No I/O needed - ConfigEnv is unused but required for trait consistency.
+    fn load<E: ConfigEnv>(&self) -> Effect<ConfigValues, ConfigErrors, E> {
+        let values = self.values.clone();
 
-        for (path, value) in &self.values {
-            config_values.insert(
-                path.clone(),
-                ConfigValue {
-                    value: value.clone(),
-                    source: SourceLocation::new(format!("defaults:{}", path)),
-                },
-            );
-        }
+        Effect::from_fn(move |_env: &E| {
+            let mut config_values = ConfigValues::new();
 
-        Validation::success(config_values)
+            for (path, value) in &values {
+                config_values.insert(
+                    path.clone(),
+                    ConfigValue {
+                        value: value.clone(),
+                        source: SourceLocation::new(format!("defaults:{}", path)),
+                    },
+                );
+            }
+
+            Ok(config_values)
+        })
     }
 
     fn name(&self) -> &str {
@@ -206,26 +228,29 @@ impl Source for PartialDefaults {
 ### Serialization to ConfigValues
 
 ```rust
+use crate::error::{ConfigError, ConfigErrors, SourceErrorKind};
+
+/// Pure function: serialize a value to ConfigValues.
 fn serialize_to_config_values<T: Serialize>(
     value: &T,
     source_name: &str,
-) -> Validation<ConfigValues, Vec<ConfigError>> {
+) -> Result<ConfigValues, ConfigErrors> {
     // Use serde_json as intermediate format
     let json = match serde_json::to_value(value) {
         Ok(v) => v,
         Err(e) => {
-            return Validation::fail(vec![ConfigError::SourceError {
+            return Err(ConfigErrors::single(ConfigError::SourceError {
                 source_name: source_name.to_string(),
                 kind: SourceErrorKind::Other {
                     message: format!("Failed to serialize defaults: {}", e),
                 },
-            }]);
+            }));
         }
     };
 
     let mut values = ConfigValues::new();
     flatten_json(&json, "", source_name, &mut values);
-    Validation::success(values)
+    Ok(values)
 }
 
 fn flatten_json(
