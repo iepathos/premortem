@@ -132,6 +132,9 @@ impl<T> Clone for WatchedConfig<T> {
     }
 }
 
+/// Type-erased reload function.
+type ReloadFn = Box<dyn Fn() -> Result<(), ConfigErrors> + Send + Sync>;
+
 /// Watcher for configuration file changes.
 ///
 /// Monitors configuration source files and triggers reloads when changes
@@ -141,6 +144,7 @@ pub struct ConfigWatcher {
     watcher: RecommendedWatcher,
     stop_signal: Arc<AtomicBool>,
     event_sender: EventSender,
+    reload_fn: ReloadFn,
 }
 
 impl ConfigWatcher {
@@ -187,6 +191,31 @@ impl ConfigWatcher {
     pub fn stop(&self) {
         self.stop_signal.store(true, Ordering::SeqCst);
     }
+
+    /// Manually trigger a configuration reload.
+    ///
+    /// This reloads all configuration sources and validates the new
+    /// configuration. If validation succeeds, the new configuration
+    /// becomes active. If validation fails, the old configuration
+    /// is preserved and errors are returned.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Configuration was successfully reloaded
+    /// * `Err(ConfigErrors)` - Reload failed, old configuration preserved
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Trigger a manual reload
+    /// match watcher.reload() {
+    ///     Ok(()) => println!("Configuration reloaded successfully"),
+    ///     Err(errors) => eprintln!("Reload failed: {:?}", errors),
+    /// }
+    /// ```
+    pub fn reload(&self) -> Result<(), ConfigErrors> {
+        (self.reload_fn)()
+    }
 }
 
 impl Drop for ConfigWatcher {
@@ -202,6 +231,61 @@ struct ReloadState<T> {
     event_sender: EventSender,
     stop_signal: Arc<AtomicBool>,
     debounce_duration: Duration,
+}
+
+/// Shared reloader that performs the actual config reload.
+///
+/// This is used both by the background watcher thread and for manual reloads.
+struct Reloader<T> {
+    current: Arc<RwLock<Arc<T>>>,
+    sources: Arc<Vec<Box<dyn Source>>>,
+    event_sender: EventSender,
+}
+
+impl<T> Clone for Reloader<T> {
+    fn clone(&self) -> Self {
+        Self {
+            current: Arc::clone(&self.current),
+            sources: Arc::clone(&self.sources),
+            event_sender: self.event_sender.clone(),
+        }
+    }
+}
+
+impl<T> Reloader<T>
+where
+    T: DeserializeOwned + Validate + Send + Sync + 'static,
+{
+    /// Perform a reload of the configuration.
+    ///
+    /// Returns `Ok(())` if the reload succeeded, or `Err` with the errors if it failed.
+    /// On failure, the old configuration is preserved.
+    fn reload(&self) -> Result<(), ConfigErrors> {
+        let env = RealEnv::new();
+        let mut builder = ConfigBuilder::<T>::new();
+        for source in self.sources.iter() {
+            builder = builder.source(SourceWrapper(source.clone_box()));
+        }
+
+        match builder.build_with_env(&env) {
+            Ok(new_config) => {
+                // Update config
+                *self.current.write().unwrap() = Arc::new(new_config.into_inner());
+                self.event_sender.send(ConfigEvent::Reloaded {
+                    changed_sources: vec!["manual".to_string()],
+                });
+                Ok(())
+            }
+            Err(errors) => {
+                // Keep old config, notify of failure
+                let error_strings: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+                self.event_sender.send(ConfigEvent::ReloadFailed {
+                    errors: error_strings,
+                });
+                Err(errors)
+            }
+        }
+    }
 }
 
 /// Build a watched configuration.
@@ -279,10 +363,18 @@ where
         }
     }
 
+    // Create shared reloader for both manual and automatic reloads
+    let sources_arc = Arc::new(sources_for_reload);
+    let reloader = Reloader {
+        current: Arc::clone(&current),
+        sources: Arc::clone(&sources_arc),
+        event_sender: event_sender.clone(),
+    };
+
     // Spawn reload handler thread
     let state = ReloadState {
         current,
-        sources: sources_for_reload,
+        sources: sources_arc.iter().map(|s| s.clone_box()).collect(),
         event_sender: event_sender.clone(),
         stop_signal: Arc::clone(&stop_signal),
         debounce_duration: Duration::from_millis(100),
@@ -290,10 +382,14 @@ where
 
     spawn_reload_handler(state, debounce_rx);
 
+    // Create the reload function for manual reloads
+    let reload_fn: ReloadFn = Box::new(move || reloader.reload());
+
     let config_watcher = ConfigWatcher {
         watcher,
         stop_signal,
         event_sender,
+        reload_fn,
     };
 
     Ok((watched, config_watcher))
@@ -482,6 +578,67 @@ mod tests {
         match event2 {
             ConfigEvent::WatchError { message } => assert_eq!(message, "test error"),
             _ => panic!("Expected WatchError"),
+        }
+    }
+
+    #[test]
+    fn test_reloader_success() {
+        use crate::sources::Defaults;
+        use crate::validate::Validate;
+        use serde::Serialize;
+        use stillwater::Validation;
+
+        // Make TestConfig serializable for Defaults
+        #[derive(Debug, Clone, serde::Deserialize, Serialize)]
+        struct SerializableConfig {
+            host: String,
+            port: i64,
+        }
+
+        impl Validate for SerializableConfig {
+            fn validate(&self) -> crate::ConfigValidation<()> {
+                Validation::Success(())
+            }
+        }
+
+        // Create a Defaults source
+        let defaults = Defaults::from(SerializableConfig {
+            host: "localhost".to_string(),
+            port: 8080,
+        });
+        let sources: Vec<Box<dyn Source>> = vec![Box::new(defaults)];
+
+        // Create the shared state
+        let config = SerializableConfig {
+            host: "initial".to_string(),
+            port: 0,
+        };
+        let current = Arc::new(RwLock::new(Arc::new(config)));
+        let event_sender = EventSender::new();
+        let rx = event_sender.subscribe();
+
+        let reloader: Reloader<SerializableConfig> = Reloader {
+            current: Arc::clone(&current),
+            sources: Arc::new(sources),
+            event_sender,
+        };
+
+        // Perform reload
+        let result = reloader.reload();
+        assert!(result.is_ok());
+
+        // Check that config was updated
+        let new_config = current.read().unwrap().clone();
+        assert_eq!(new_config.host, "localhost");
+        assert_eq!(new_config.port, 8080);
+
+        // Check that event was sent
+        let event = rx.recv_timeout(Duration::from_millis(100)).unwrap();
+        match event {
+            ConfigEvent::Reloaded { changed_sources } => {
+                assert_eq!(changed_sources, vec!["manual"]);
+            }
+            _ => panic!("Expected Reloaded event"),
         }
     }
 }
