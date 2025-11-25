@@ -515,4 +515,383 @@ mod tests {
         assert_eq!(grouped.get("config.toml").map(|v| v.len()), Some(2));
         assert_eq!(grouped.get("(general)").map(|v| v.len()), Some(1));
     }
+
+    // Test Semigroup associativity law: (a <> b) <> c == a <> (b <> c)
+    #[test]
+    fn test_config_errors_semigroup_associativity() {
+        let a = ConfigErrors::single(ConfigError::NoSources);
+        let b = ConfigErrors::single(ConfigError::MissingField {
+            path: "host".to_string(),
+            searched_sources: vec!["config.toml".to_string()],
+        });
+        let c = ConfigErrors::single(ConfigError::MissingField {
+            path: "port".to_string(),
+            searched_sources: vec!["env".to_string()],
+        });
+
+        let left = a.clone().combine(b.clone()).combine(c.clone());
+        let right = a.combine(b.combine(c));
+
+        assert_eq!(left.len(), right.len());
+        assert_eq!(left.len(), 3);
+    }
+
+    #[test]
+    fn test_source_error_kind_display() {
+        let not_found = SourceErrorKind::NotFound {
+            path: "/etc/config.toml".to_string(),
+        };
+        assert_eq!(format!("{}", not_found), "file not found: /etc/config.toml");
+
+        let io_err = SourceErrorKind::IoError {
+            message: "permission denied".to_string(),
+        };
+        assert_eq!(format!("{}", io_err), "I/O error: permission denied");
+
+        let parse_err = SourceErrorKind::ParseError {
+            message: "unexpected token".to_string(),
+            line: Some(10),
+            column: Some(5),
+        };
+        assert_eq!(
+            format!("{}", parse_err),
+            "parse error: unexpected token at line 10, column 5"
+        );
+
+        let parse_err_no_pos = SourceErrorKind::ParseError {
+            message: "invalid syntax".to_string(),
+            line: None,
+            column: None,
+        };
+        assert_eq!(
+            format!("{}", parse_err_no_pos),
+            "parse error: invalid syntax"
+        );
+
+        let conn_err = SourceErrorKind::ConnectionError {
+            message: "timeout".to_string(),
+        };
+        assert_eq!(format!("{}", conn_err), "connection error: timeout");
+
+        let other = SourceErrorKind::Other {
+            message: "custom error".to_string(),
+        };
+        assert_eq!(format!("{}", other), "custom error");
+    }
+
+    #[test]
+    fn test_config_error_display_all_variants() {
+        // MissingField
+        let err = ConfigError::MissingField {
+            path: "db.host".to_string(),
+            searched_sources: vec!["config.toml".to_string(), "env".to_string()],
+        };
+        assert_eq!(
+            format!("{}", err),
+            "missing required field 'db.host' (searched: config.toml, env)"
+        );
+
+        // ParseError
+        let err = ConfigError::ParseError {
+            path: "port".to_string(),
+            source_location: SourceLocation::new("config.toml").with_line(5),
+            expected_type: "integer".to_string(),
+            actual_value: "abc".to_string(),
+            message: "invalid digit".to_string(),
+        };
+        assert_eq!(
+            format!("{}", err),
+            "[config.toml:5] 'port': expected integer, got \"abc\": invalid digit"
+        );
+
+        // ValidationError with location
+        let err = ConfigError::ValidationError {
+            path: "timeout".to_string(),
+            source_location: Some(SourceLocation::new("config.toml")),
+            value: Some("0".to_string()),
+            message: "must be positive".to_string(),
+        };
+        assert_eq!(
+            format!("{}", err),
+            "[config.toml] 'timeout': must be positive"
+        );
+
+        // ValidationError without location
+        let err = ConfigError::ValidationError {
+            path: "timeout".to_string(),
+            source_location: None,
+            value: Some("0".to_string()),
+            message: "must be positive".to_string(),
+        };
+        assert_eq!(format!("{}", err), "'timeout': must be positive");
+
+        // CrossFieldError
+        let err = ConfigError::CrossFieldError {
+            paths: vec!["start_date".to_string(), "end_date".to_string()],
+            message: "start_date must be before end_date".to_string(),
+        };
+        assert_eq!(
+            format!("{}", err),
+            "[start_date, end_date]: start_date must be before end_date"
+        );
+
+        // UnknownField without suggestion
+        let err = ConfigError::UnknownField {
+            path: "hoost".to_string(),
+            source_location: SourceLocation::new("config.toml").with_line(3),
+            did_you_mean: None,
+        };
+        assert_eq!(format!("{}", err), "[config.toml:3] unknown field 'hoost'");
+
+        // UnknownField with suggestion
+        let err = ConfigError::UnknownField {
+            path: "hoost".to_string(),
+            source_location: SourceLocation::new("config.toml").with_line(3),
+            did_you_mean: Some("host".to_string()),
+        };
+        assert_eq!(
+            format!("{}", err),
+            "[config.toml:3] unknown field 'hoost'; did you mean 'host'?"
+        );
+
+        // SourceError
+        let err = ConfigError::SourceError {
+            source_name: "config.toml".to_string(),
+            kind: SourceErrorKind::NotFound {
+                path: "/etc/config.toml".to_string(),
+            },
+        };
+        assert_eq!(
+            format!("{}", err),
+            "config.toml: file not found: /etc/config.toml"
+        );
+
+        // NoSources
+        let err = ConfigError::NoSources;
+        assert_eq!(format!("{}", err), "no configuration sources provided");
+    }
+
+    #[test]
+    fn test_config_error_source_location() {
+        let err = ConfigError::ParseError {
+            path: "port".to_string(),
+            source_location: SourceLocation::new("config.toml"),
+            expected_type: "integer".to_string(),
+            actual_value: "abc".to_string(),
+            message: "invalid digit".to_string(),
+        };
+        assert!(err.source_location().is_some());
+        assert_eq!(err.source_location().unwrap().source, "config.toml");
+
+        let err = ConfigError::ValidationError {
+            path: "timeout".to_string(),
+            source_location: None,
+            value: None,
+            message: "must be positive".to_string(),
+        };
+        assert!(err.source_location().is_none());
+
+        let err = ConfigError::MissingField {
+            path: "host".to_string(),
+            searched_sources: vec![],
+        };
+        assert!(err.source_location().is_none());
+    }
+
+    #[test]
+    fn test_config_error_is_validation_error() {
+        let validation_err = ConfigError::ValidationError {
+            path: "port".to_string(),
+            source_location: None,
+            value: None,
+            message: "must be positive".to_string(),
+        };
+        assert!(validation_err.is_validation_error());
+
+        let cross_field_err = ConfigError::CrossFieldError {
+            paths: vec!["start".to_string(), "end".to_string()],
+            message: "invalid range".to_string(),
+        };
+        assert!(cross_field_err.is_validation_error());
+
+        let parse_err = ConfigError::ParseError {
+            path: "port".to_string(),
+            source_location: SourceLocation::new("config.toml"),
+            expected_type: "integer".to_string(),
+            actual_value: "abc".to_string(),
+            message: "invalid digit".to_string(),
+        };
+        assert!(!parse_err.is_validation_error());
+    }
+
+    #[test]
+    fn test_config_error_suggestion() {
+        let unknown_field = ConfigError::UnknownField {
+            path: "hoost".to_string(),
+            source_location: SourceLocation::new("config.toml"),
+            did_you_mean: Some("host".to_string()),
+        };
+        assert_eq!(
+            unknown_field.suggestion(),
+            Some("Change 'hoost' to 'host'".to_string())
+        );
+
+        let missing_field = ConfigError::MissingField {
+            path: "database.url".to_string(),
+            searched_sources: vec![],
+        };
+        assert_eq!(
+            missing_field.suggestion(),
+            Some("Add 'database.url' to your configuration".to_string())
+        );
+
+        let parse_err = ConfigError::ParseError {
+            path: "port".to_string(),
+            source_location: SourceLocation::new("config.toml"),
+            expected_type: "integer".to_string(),
+            actual_value: "abc".to_string(),
+            message: "invalid digit".to_string(),
+        };
+        assert!(parse_err.suggestion().is_none());
+    }
+
+    #[test]
+    fn test_config_error_with_context() {
+        let err = ConfigError::ValidationError {
+            path: "port".to_string(),
+            source_location: None,
+            value: Some("0".to_string()),
+            message: "must be positive".to_string(),
+        };
+        let with_ctx = err.with_context("while validating server config");
+        match with_ctx {
+            ConfigError::ValidationError { message, .. } => {
+                assert_eq!(
+                    message,
+                    "while validating server config -> must be positive"
+                );
+            }
+            _ => panic!("Expected ValidationError"),
+        }
+    }
+
+    #[test]
+    fn test_source_error_kind_with_context() {
+        let err = SourceErrorKind::Other {
+            message: "custom error".to_string(),
+        };
+        let with_ctx = err.with_context("loading config");
+        match with_ctx {
+            SourceErrorKind::Other { message } => {
+                assert_eq!(message, "loading config -> custom error");
+            }
+            _ => panic!("Expected Other variant"),
+        }
+
+        // Non-Other variants should pass through unchanged
+        let err = SourceErrorKind::NotFound {
+            path: "/etc/config".to_string(),
+        };
+        let with_ctx = err.with_context("loading config");
+        match with_ctx {
+            SourceErrorKind::NotFound { path } => {
+                assert_eq!(path, "/etc/config");
+            }
+            _ => panic!("Expected NotFound variant"),
+        }
+    }
+
+    #[test]
+    fn test_config_errors_from_vec() {
+        // Empty vec returns None
+        let empty: Vec<ConfigError> = vec![];
+        assert!(ConfigErrors::from_vec(empty).is_none());
+
+        // Non-empty vec returns Some
+        let errors = ConfigErrors::from_vec(vec![ConfigError::NoSources]);
+        assert!(errors.is_some());
+        assert_eq!(errors.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_config_errors_iter() {
+        let errors = ConfigErrors::from_vec(vec![
+            ConfigError::NoSources,
+            ConfigError::MissingField {
+                path: "host".to_string(),
+                searched_sources: vec![],
+            },
+        ])
+        .unwrap();
+
+        let paths: Vec<_> = errors.iter().filter_map(|e| e.path()).collect();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], "host");
+    }
+
+    #[test]
+    fn test_config_errors_into_iter() {
+        let errors = ConfigErrors::from_vec(vec![
+            ConfigError::NoSources,
+            ConfigError::MissingField {
+                path: "host".to_string(),
+                searched_sources: vec![],
+            },
+        ])
+        .unwrap();
+
+        let collected: Vec<_> = errors.into_iter().collect();
+        assert_eq!(collected.len(), 2);
+    }
+
+    #[test]
+    fn test_config_errors_with_context() {
+        let errors = ConfigErrors::from_vec(vec![ConfigError::ValidationError {
+            path: "port".to_string(),
+            source_location: None,
+            value: Some("0".to_string()),
+            message: "must be positive".to_string(),
+        }])
+        .unwrap();
+
+        let with_ctx = errors.with_context("validating server");
+        let first = with_ctx.first();
+        match first {
+            ConfigError::ValidationError { message, .. } => {
+                assert!(message.contains("validating server"));
+            }
+            _ => panic!("Expected ValidationError"),
+        }
+    }
+
+    #[test]
+    fn test_config_errors_display() {
+        let errors = ConfigErrors::from_vec(vec![
+            ConfigError::NoSources,
+            ConfigError::MissingField {
+                path: "host".to_string(),
+                searched_sources: vec!["config.toml".to_string()],
+            },
+        ])
+        .unwrap();
+
+        let display = format!("{}", errors);
+        assert!(display.contains("Configuration errors (2):"));
+        assert!(display.contains("no configuration sources provided"));
+        assert!(display.contains("missing required field 'host'"));
+    }
+
+    #[test]
+    fn test_config_errors_from_single_error() {
+        let errors: ConfigErrors = ConfigError::NoSources.into();
+        assert_eq!(errors.len(), 1);
+    }
+
+    #[test]
+    fn test_source_location_file() {
+        let loc = SourceLocation::file("config.toml", Some(10), Some(5));
+        assert_eq!(loc.source, "config.toml");
+        assert_eq!(loc.line, Some(10));
+        assert_eq!(loc.column, Some(5));
+    }
 }

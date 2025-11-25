@@ -208,7 +208,7 @@ mod tests {
 
         assert_eq!(Value::Bool(true).as_bool(), Some(true));
         assert_eq!(Value::Integer(42).as_integer(), Some(42));
-        assert_eq!(Value::Float(3.14).as_float(), Some(3.14));
+        assert_eq!(Value::Float(2.71).as_float(), Some(2.71));
         assert_eq!(Value::Integer(42).as_float(), Some(42.0));
         assert_eq!(Value::String("hello".to_string()).as_str(), Some("hello"));
     }
@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(Value::Null.type_name(), "null");
         assert_eq!(Value::Bool(true).type_name(), "boolean");
         assert_eq!(Value::Integer(42).type_name(), "integer");
-        assert_eq!(Value::Float(3.14).type_name(), "float");
+        assert_eq!(Value::Float(2.71).type_name(), "float");
         assert_eq!(Value::String("test".to_string()).type_name(), "string");
         assert_eq!(Value::Array(vec![]).type_name(), "array");
         assert_eq!(Value::Table(BTreeMap::new()).type_name(), "table");
@@ -252,7 +252,7 @@ mod tests {
         let _: Value = true.into();
         let _: Value = 42i64.into();
         let _: Value = 42i32.into();
-        let _: Value = 3.14f64.into();
+        let _: Value = 2.71f64.into();
         let _: Value = "hello".into();
         let _: Value = String::from("hello").into();
         let _: Value = vec![1i64, 2, 3].into();
