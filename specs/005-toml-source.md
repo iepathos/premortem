@@ -19,9 +19,30 @@ created: 2025-11-25
 
 TOML is the default configuration format for Rust applications. The TOML source implementation provides file-based configuration loading with proper error reporting including line/column information for parse errors.
 
+### Stillwater Pattern: Effect for I/O
+
+File reading is I/O, which lives in the **imperative shell** per stillwater's architecture:
+
+```
+┌─────────────────────────────────────────┐
+│  Toml::load() -> Effect<ConfigValues>   │  ← I/O at boundary
+└───────────────────┬─────────────────────┘
+                    │ (runs via .run(&()))
+                    ▼
+┌─────────────────────────────────────────┐
+│  parse_toml() -> ConfigValidation       │  ← Pure parsing
+│  flatten_value() -> ConfigValues        │  ← Pure transformation
+└─────────────────────────────────────────┘
+```
+
+The `Source::load()` returns `Effect<ConfigValues, ConfigErrors, ()>`:
+- **Effect** wraps the I/O operation (file read)
+- **ConfigErrors** (NonEmptyVec) enables Semigroup error accumulation
+- **Unit env `()`** means no runtime dependencies needed
+
 ## Objective
 
-Implement a `Toml` source that loads configuration from TOML files, with support for required/optional files, string content, and rich error reporting with source locations.
+Implement a `Toml` source that loads configuration from TOML files using stillwater's Effect pattern for I/O, with support for required/optional files, string content, and rich error reporting with source locations.
 
 ## Requirements
 
@@ -112,47 +133,66 @@ impl Toml {
 }
 ```
 
-### Source Implementation
+### Source Implementation (Effect-based)
 
 ```rust
+use stillwater::{Effect, IO};
+use crate::error::{ConfigError, ConfigErrors, SourceErrorKind};
+use crate::source::{ConfigValues, Source};
+
 impl Source for Toml {
-    fn load(&self) -> Validation<ConfigValues, Vec<ConfigError>> {
-        let (content, source_name) = match &self.source {
-            TomlSource::File(path) => {
-                match std::fs::read_to_string(path) {
-                    Ok(content) => {
-                        let name = self.name.clone()
-                            .unwrap_or_else(|| path.display().to_string());
-                        (content, name)
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        if self.required {
-                            return Validation::fail(vec![ConfigError::SourceError {
+    /// Load TOML configuration wrapped in Effect.
+    ///
+    /// File I/O is wrapped in Effect, keeping it at the boundary.
+    /// Parsing is pure and happens after the Effect executes.
+    fn load(&self) -> Effect<ConfigValues, ConfigErrors, ()> {
+        let source = self.source.clone();
+        let required = self.required;
+        let custom_name = self.name.clone();
+
+        // Wrap file I/O in Effect
+        Effect::from_fn(move |_: &()| {
+            let (content, source_name) = match &source {
+                TomlSource::File(path) => {
+                    // I/O happens here, inside the Effect
+                    match std::fs::read_to_string(path) {
+                        Ok(content) => {
+                            let name = custom_name.clone()
+                                .unwrap_or_else(|| path.display().to_string());
+                            (content, name)
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                            if required {
+                                return Err(ConfigErrors::single(ConfigError::SourceError {
+                                    source_name: path.display().to_string(),
+                                    kind: SourceErrorKind::NotFound {
+                                        path: path.display().to_string(),
+                                    },
+                                }));
+                            } else {
+                                // Optional file missing = empty values (success)
+                                return Ok(ConfigValues::empty());
+                            }
+                        }
+                        Err(e) => {
+                            return Err(ConfigErrors::single(ConfigError::SourceError {
                                 source_name: path.display().to_string(),
-                                kind: SourceErrorKind::NotFound {
-                                    path: path.display().to_string(),
+                                kind: SourceErrorKind::IoError {
+                                    message: e.to_string(),
                                 },
-                            }]);
-                        } else {
-                            return Validation::success(ConfigValues::empty());
+                            }));
                         }
                     }
-                    Err(e) => {
-                        return Validation::fail(vec![ConfigError::SourceError {
-                            source_name: path.display().to_string(),
-                            kind: SourceErrorKind::IoError {
-                                message: e.to_string(),
-                            },
-                        }]);
-                    }
                 }
-            }
-            TomlSource::String { content, name } => {
-                (content.clone(), self.name.clone().unwrap_or_else(|| name.clone()))
-            }
-        };
+                TomlSource::String { content, name } => {
+                    // String content - no I/O, but still wrapped for consistency
+                    (content.clone(), custom_name.clone().unwrap_or_else(|| name.clone()))
+                }
+            };
 
-        self.parse_toml(&content, &source_name)
+            // Pure parsing (after I/O)
+            parse_toml(&content, &source_name)
+        })
     }
 
     fn name(&self) -> &str {
@@ -165,75 +205,86 @@ impl Source for Toml {
                 .unwrap_or(name),
         }
     }
+
+    #[cfg(feature = "watch")]
+    fn watch_path(&self) -> Option<PathBuf> {
+        match &self.source {
+            TomlSource::File(path) => Some(path.clone()),
+            TomlSource::String { .. } => None,
+        }
+    }
 }
 ```
 
-### TOML Parsing with Position Tracking
+### TOML Parsing (Pure Function)
 
 ```rust
-impl Toml {
-    fn parse_toml(&self, content: &str, source_name: &str) -> Validation<ConfigValues, Vec<ConfigError>> {
-        // Use toml crate with span information
-        let document: toml::de::Value = match content.parse() {
-            Ok(doc) => doc,
-            Err(e) => {
-                return Validation::fail(vec![ConfigError::SourceError {
-                    source_name: source_name.to_string(),
-                    kind: SourceErrorKind::ParseError {
-                        message: e.message().to_string(),
-                        line: e.line(),
-                        column: e.column(),
-                    },
-                }]);
-            }
-        };
+use crate::error::{ConfigError, ConfigErrors, SourceErrorKind};
 
-        // Convert to ConfigValues with source locations
-        let mut values = ConfigValues::new();
-        self.flatten_value(&document, "", source_name, &mut values);
-        Validation::success(values)
-    }
+/// Pure function: parse TOML content into ConfigValues.
+/// No I/O - this runs after the Effect has read the file.
+fn parse_toml(content: &str, source_name: &str) -> Result<ConfigValues, ConfigErrors> {
+    // Use toml crate with span information
+    let document: toml::de::Value = match content.parse() {
+        Ok(doc) => doc,
+        Err(e) => {
+            return Err(ConfigErrors::single(ConfigError::SourceError {
+                source_name: source_name.to_string(),
+                kind: SourceErrorKind::ParseError {
+                    message: e.message().to_string(),
+                    line: e.line(),
+                    column: e.column(),
+                },
+            }));
+        }
+    };
 
-    fn flatten_value(
-        &self,
-        value: &toml::Value,
-        prefix: &str,
-        source_name: &str,
-        values: &mut ConfigValues,
-    ) {
-        match value {
-            toml::Value::Table(table) => {
-                for (key, val) in table {
-                    let path = if prefix.is_empty() {
-                        key.clone()
-                    } else {
-                        format!("{}.{}", prefix, key)
-                    };
-                    self.flatten_value(val, &path, source_name, values);
-                }
-            }
-            toml::Value::Array(arr) => {
-                for (i, val) in arr.iter().enumerate() {
-                    let path = format!("{}[{}]", prefix, i);
-                    self.flatten_value(val, &path, source_name, values);
-                }
-                // Also store array length for validation
-                values.insert(
-                    format!("{}.__len", prefix),
-                    ConfigValue {
-                        value: Value::Integer(arr.len() as i64),
-                        source: SourceLocation::new(source_name),
-                    },
-                );
-            }
-            _ => {
-                let config_value = ConfigValue {
-                    value: toml_to_value(value),
-                    source: SourceLocation::new(source_name),
-                    // TODO: Track line numbers per value using toml_edit
+    // Pure transformation: TOML -> ConfigValues
+    let mut values = ConfigValues::new();
+    flatten_value(&document, "", source_name, &mut values);
+    Ok(values)
+}
+
+/// Pure function: recursively flatten TOML structure to dot-notation paths.
+/// This is a pure transformation - no I/O.
+fn flatten_value(
+    value: &toml::Value,
+    prefix: &str,
+    source_name: &str,
+    values: &mut ConfigValues,
+) {
+    match value {
+        toml::Value::Table(table) => {
+            for (key, val) in table {
+                let path = if prefix.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{}.{}", prefix, key)
                 };
-                values.insert(prefix.to_string(), config_value);
+                flatten_value(val, &path, source_name, values);
             }
+        }
+        toml::Value::Array(arr) => {
+            for (i, val) in arr.iter().enumerate() {
+                let path = format!("{}[{}]", prefix, i);
+                flatten_value(val, &path, source_name, values);
+            }
+            // Also store array length for validation
+            values.insert(
+                format!("{}.__len", prefix),
+                ConfigValue {
+                    value: Value::Integer(arr.len() as i64),
+                    source: SourceLocation::new(source_name),
+                },
+            );
+        }
+        _ => {
+            let config_value = ConfigValue {
+                value: toml_to_value(value),
+                source: SourceLocation::new(source_name),
+                // TODO: Track line numbers per value using toml_edit
+            };
+            values.insert(prefix.to_string(), config_value);
         }
     }
 }
@@ -289,6 +340,7 @@ fn parse_with_spans(content: &str, source_name: &str) -> Validation<ConfigValues
 - **Prerequisites**: Specs 001, 002
 - **Affected Components**: Config builder integration
 - **External Dependencies**:
+  - `stillwater` crate for `Effect` type
   - `toml` crate for parsing
   - `toml_edit` crate for span information (optional, for precise line tracking)
 

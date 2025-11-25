@@ -19,9 +19,30 @@ created: 2025-11-25
 
 Clear, actionable error messages are a key differentiator for premortem. Users should see all configuration errors grouped by source, with helpful suggestions for fixing them. This specification covers the pretty printing and formatting of configuration errors.
 
+### Stillwater Integration
+
+Pretty printing works with `ConfigErrors` (the NonEmptyVec wrapper from spec 002):
+
+```rust
+/// Pretty print configuration errors
+pub fn pretty_print(errors: &ConfigErrors, options: PrettyPrintOptions) {
+    // ConfigErrors guarantees at least one error exists
+    // Can safely call errors.first() without Option
+}
+```
+
+This integrates with the `unwrap_or_exit()` pattern:
+
+```rust
+let config = Config::<AppConfig>::builder()
+    .source(Toml::file("config.toml"))
+    .build()
+    .unwrap_or_exit();  // Pretty prints ConfigErrors and exits
+```
+
 ## Objective
 
-Implement error reporting utilities that format configuration errors in a clear, grouped, and colorful way, with support for suggestions and redaction of sensitive values.
+Implement error reporting utilities that format `ConfigErrors` (NonEmptyVec) in a clear, grouped, and colorful way, with support for suggestions and redaction of sensitive values.
 
 ## Requirements
 

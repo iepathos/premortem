@@ -19,9 +19,33 @@ created: 2025-11-25
 
 Manual implementation of the `Validate` trait is verbose and error-prone. A derive macro provides a declarative way to specify validation rules directly on struct fields, similar to how `serde` derives work. This is the primary user-facing API for validation.
 
+### Stillwater Integration
+
+The generated code must follow stillwater's patterns:
+
+1. **`Validation::all()`** - Generated impl uses applicative pattern to run ALL validations
+2. **`ConfigValidation<()>`** - Returns `Validation<(), ConfigErrors>` for Semigroup accumulation
+3. **`traverse`** - Collection validation uses traverse for error accumulation
+4. **Pure functions** - All validators are pure (no I/O in generated code)
+
+```rust
+// Generated code pattern:
+impl Validate for Config {
+    fn validate(&self) -> ConfigValidation<()> {
+        Validation::all((
+            validate_field(&self.field1, "field1", &[&NonEmpty]),
+            validate_field(&self.field2, "field2", &[&Range(1..=100)]),
+            // ... all fields in parallel via Validation::all()
+        ))
+        .map(|_| ())
+        .and_then(|_| custom_validator(self))  // struct-level after fields
+    }
+}
+```
+
 ## Objective
 
-Implement a `#[derive(Validate)]` proc macro that generates `Validate` implementations from field attributes, supporting all built-in validators and custom validation functions.
+Implement a `#[derive(Validate)]` proc macro that generates `Validate` implementations using stillwater's `Validation::all()` pattern for error accumulation, supporting all built-in validators and custom validation functions.
 
 ## Requirements
 

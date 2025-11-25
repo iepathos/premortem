@@ -19,9 +19,24 @@ created: 2025-11-25
 
 Environment variables are the standard way to configure applications in production, especially in containerized environments. They typically override file-based configuration and are commonly prefixed to avoid collisions (e.g., `APP_DATABASE_HOST`).
 
+### Stillwater Pattern
+
+Like TOML source, Env implements the Source trait with Effect-based loading:
+
+```rust
+fn load(&self) -> Effect<ConfigValues, ConfigErrors, ()>
+```
+
+While `std::env::vars()` is technically I/O, it's:
+- Fast and synchronous
+- Always available (no file system errors)
+- No parse errors possible (just key-value strings)
+
+The transformation from env vars to ConfigValues is pure.
+
 ## Objective
 
-Implement an `Env` source that loads configuration from environment variables, with support for prefixes, custom mappings, case sensitivity options, and list parsing.
+Implement an `Env` source that loads configuration from environment variables using the Effect pattern, with support for prefixes, custom mappings, case sensitivity options, and list parsing.
 
 ## Requirements
 
