@@ -188,6 +188,63 @@ impl<T> ConfigBuilder<T> {
         self.build_traced_with_env(&RealEnv::new())
     }
 
+    /// Build the configuration with file watching enabled.
+    ///
+    /// This enables hot-reloading of configuration when source files change.
+    /// The returned `WatchedConfig` provides thread-safe access to the current
+    /// configuration, and the `ConfigWatcher` allows subscribing to change events.
+    ///
+    /// Only available with the `watch` feature enabled.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let (config, watcher) = Config::<AppConfig>::builder()
+    ///     .source(Toml::file("config.toml"))
+    ///     .source(Env::prefix("APP_"))
+    ///     .build_watched()?;
+    ///
+    /// // Get current config (cheap Arc clone)
+    /// let current = config.current();
+    ///
+    /// // Subscribe to changes
+    /// watcher.on_change(|event| {
+    ///     match event {
+    ///         ConfigEvent::Reloaded { .. } => println!("Config reloaded!"),
+    ///         ConfigEvent::ReloadFailed { errors } => eprintln!("Reload failed: {:?}", errors),
+    ///         _ => {}
+    ///     }
+    /// });
+    /// ```
+    #[cfg(feature = "watch")]
+    pub fn build_watched(
+        self,
+    ) -> Result<(crate::watch::WatchedConfig<T>, crate::watch::ConfigWatcher), ConfigErrors>
+    where
+        T: DeserializeOwned + Validate + Send + Sync + 'static,
+    {
+        self.build_watched_with_env(&RealEnv::new())
+    }
+
+    /// Build the configuration with file watching using a custom environment.
+    ///
+    /// This enables dependency injection for testing watched builds.
+    #[cfg(feature = "watch")]
+    pub fn build_watched_with_env(
+        self,
+        env: &dyn ConfigEnv,
+    ) -> Result<(crate::watch::WatchedConfig<T>, crate::watch::ConfigWatcher), ConfigErrors>
+    where
+        T: DeserializeOwned + Validate + Send + Sync + 'static,
+    {
+        // Check for empty sources first
+        if self.sources.is_empty() {
+            return Err(ConfigErrors::single(ConfigError::NoSources));
+        }
+
+        crate::watch::build_watched(self.sources, env)
+    }
+
     /// Build the configuration with tracing using a custom environment.
     ///
     /// This enables dependency injection for testing traced builds.
@@ -293,6 +350,7 @@ mod tests {
     use crate::value::Value;
 
     // A simple test source that returns static values
+    #[derive(Clone)]
     struct StaticSource {
         name: String,
         values: ConfigValues,
@@ -322,6 +380,16 @@ mod tests {
 
         fn name(&self) -> &str {
             &self.name
+        }
+
+        #[cfg(feature = "watch")]
+        fn watch_path(&self) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        #[cfg(feature = "watch")]
+        fn clone_box(&self) -> Box<dyn Source> {
+            Box::new(self.clone())
         }
     }
 
@@ -458,6 +526,7 @@ mod tests {
     }
 
     // Test error accumulation from multiple sources
+    #[derive(Clone)]
     struct FailingSource {
         name: String,
     }
@@ -483,6 +552,16 @@ mod tests {
 
         fn name(&self) -> &str {
             &self.name
+        }
+
+        #[cfg(feature = "watch")]
+        fn watch_path(&self) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        #[cfg(feature = "watch")]
+        fn clone_box(&self) -> Box<dyn Source> {
+            Box::new(self.clone())
         }
     }
 

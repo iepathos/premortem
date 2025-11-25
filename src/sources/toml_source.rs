@@ -215,6 +215,11 @@ impl Source for Toml {
             TomlSource::String { .. } => None,
         }
     }
+
+    #[cfg(feature = "watch")]
+    fn clone_box(&self) -> Box<dyn Source> {
+        Box::new(self.clone())
+    }
 }
 
 /// Pure function: parse TOML content into ConfigValues.
