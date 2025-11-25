@@ -90,6 +90,25 @@ cd examples/tracing
 cargo run
 ```
 
+### [web-server](./web-server/)
+
+**Axum web server integration**
+
+Demonstrates how to use premortem to validate web server configuration before starting an Axum server. Shows:
+- Web server configuration patterns (host, port, TLS, timeouts)
+- Validation of network-related settings
+- Cross-field validation (TLS cert requires TLS key)
+- Integration with async runtime
+- Graceful error reporting before server startup
+
+```bash
+cd examples/web-server
+cargo run
+
+# Override with environment variables:
+SERVER_PORT=8080 SERVER_HOST=0.0.0.0 cargo run
+```
+
 ## Key Concepts Demonstrated
 
 ### Error Accumulation
