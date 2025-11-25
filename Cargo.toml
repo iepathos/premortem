@@ -12,6 +12,7 @@ readme = "README.md"
 
 [workspace]
 members = ["premortem-derive"]
+exclude = ["examples/basic", "examples/validation", "examples/testing", "examples/layered", "examples/tracing", "examples/web-server"]
 
 [dependencies]
 stillwater = { path = "/Users/glen/memento-mori/stillwater" }

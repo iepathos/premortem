@@ -1,0 +1,9 @@
+# Production environment configuration
+#
+# Inherits from base.toml, overrides specific values for production
+
+host = "0.0.0.0"
+port = 80
+debug = false
+log_level = "warn"
+max_connections = 1000

@@ -108,6 +108,77 @@ premortem = { version = "0.1", features = ["json", "yaml", "watch"] }
 | `remote` | Remote sources (Consul, etcd, Vault, etc.) |
 | `full` | All features |
 
+## Examples
+
+See the [`examples/`](./examples/) directory for runnable examples:
+
+| Example | Description |
+|---------|-------------|
+| [basic](./examples/basic/) | Minimal configuration loading |
+| [validation](./examples/validation/) | Comprehensive validation patterns |
+| [testing](./examples/testing/) | Configuration testing with MockEnv |
+| [layered](./examples/layered/) | Multi-source environment-specific config |
+| [tracing](./examples/tracing/) | Value origin debugging |
+
+Run an example:
+
+```bash
+cd examples/basic
+cargo run
+```
+
+## Documentation
+
+- [Common Patterns](./docs/PATTERNS.md) — Layered config, secrets, nested structs
+- [Testing Guide](./docs/TESTING.md) — Testing with MockEnv
+
+## Core Concepts
+
+### Source Layering
+
+Sources are applied in order, with later sources overriding earlier ones:
+
+```rust
+let config = Config::<AppConfig>::builder()
+    .source(Defaults::from(AppConfig::default()))  // Lowest priority
+    .source(Toml::file("config.toml"))
+    .source(Env::prefix("APP_"))                   // Highest priority
+    .build()?;
+```
+
+### Testable I/O
+
+All I/O is abstracted through `ConfigEnv`, enabling testing with `MockEnv`:
+
+```rust
+let env = MockEnv::new()
+    .with_file("config.toml", "port = 8080")
+    .with_env("APP_HOST", "localhost");
+
+let config = Config::<AppConfig>::builder()
+    .source(Toml::file("config.toml"))
+    .source(Env::prefix("APP_"))
+    .build_with_env(&env)?;
+```
+
+### Value Tracing
+
+Debug where configuration values came from:
+
+```rust
+let traced = Config::<AppConfig>::builder()
+    .source(Defaults::from(AppConfig::default()))
+    .source(Toml::file("config.toml"))
+    .source(Env::prefix("APP_"))
+    .build_traced()?;
+
+// Check what was overridden
+for path in traced.overridden_paths() {
+    let trace = traced.trace(path).unwrap();
+    println!("{}: {:?} from {}", path, trace.final_value.value, trace.final_value.source);
+}
+```
+
 ## License
 
 MIT Glen Baker <iepathos@gmail.com>
