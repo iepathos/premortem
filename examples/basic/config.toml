@@ -1,0 +1,10 @@
+# Basic example configuration file
+#
+# These values can be overridden by environment variables:
+# - APP_HOST overrides host
+# - APP_PORT overrides port
+# - APP_DEBUG overrides debug
+
+host = "localhost"
+port = 8080
+debug = false

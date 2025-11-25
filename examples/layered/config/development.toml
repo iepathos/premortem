@@ -1,0 +1,9 @@
+# Development environment configuration
+#
+# Inherits from base.toml, overrides specific values for development
+
+host = "localhost"
+port = 3000
+debug = true
+log_level = "debug"
+max_connections = 10

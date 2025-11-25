@@ -1,0 +1,9 @@
+# Tracing example configuration
+#
+# These values override the defaults and can be
+# overridden by environment variables (APP_HOST, etc.)
+
+host = "from-config-file"
+port = 9000
+debug = true
+# log_level is intentionally omitted to show default value

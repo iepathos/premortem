@@ -1,0 +1,10 @@
+# Base configuration - shared across all environments
+#
+# These values can be overridden by:
+# 1. Environment-specific files (development.toml, production.toml)
+# 2. Environment variables (APP_HOST, APP_PORT, etc.)
+
+host = "0.0.0.0"
+port = 8080
+log_level = "info"
+max_connections = 100
