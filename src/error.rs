@@ -244,6 +244,73 @@ impl ConfigError {
             other => other,
         }
     }
+
+    /// Add a path prefix to this error.
+    ///
+    /// For errors with a path, prepends the prefix with a dot separator.
+    /// For example, if path is "port" and prefix is "database", the result is "database.port".
+    /// If the path starts with "[", treats it as an array index and doesn't add a dot.
+    pub fn with_path_prefix(self, prefix: &str) -> Self {
+        match self {
+            ConfigError::ParseError {
+                path,
+                source_location,
+                expected_type,
+                actual_value,
+                message,
+            } => ConfigError::ParseError {
+                path: prefix_path(prefix, &path),
+                source_location,
+                expected_type,
+                actual_value,
+                message,
+            },
+            ConfigError::MissingField {
+                path,
+                searched_sources,
+            } => ConfigError::MissingField {
+                path: prefix_path(prefix, &path),
+                searched_sources,
+            },
+            ConfigError::ValidationError {
+                path,
+                source_location,
+                value,
+                message,
+            } => ConfigError::ValidationError {
+                path: prefix_path(prefix, &path),
+                source_location,
+                value,
+                message,
+            },
+            ConfigError::CrossFieldError { paths, message } => ConfigError::CrossFieldError {
+                paths: paths.into_iter().map(|p| prefix_path(prefix, &p)).collect(),
+                message,
+            },
+            ConfigError::UnknownField {
+                path,
+                source_location,
+                did_you_mean,
+            } => ConfigError::UnknownField {
+                path: prefix_path(prefix, &path),
+                source_location,
+                did_you_mean,
+            },
+            other => other, // SourceError and NoSources don't have paths
+        }
+    }
+}
+
+/// Helper function to prefix a path with a parent path.
+fn prefix_path(prefix: &str, path: &str) -> String {
+    if path.is_empty() {
+        prefix.to_string()
+    } else if path.starts_with('[') {
+        // Array index - no dot needed
+        format!("{}{}", prefix, path)
+    } else {
+        format!("{}.{}", prefix, path)
+    }
 }
 
 impl fmt::Display for ConfigError {
@@ -360,6 +427,15 @@ impl ConfigErrors {
     pub fn with_context(self, context: impl Into<String>) -> Self {
         let context = context.into();
         Self(self.0.map(|e| e.with_context(&context)))
+    }
+
+    /// Add a path prefix to all error paths.
+    ///
+    /// This is used for nested validation to add parent context to error paths.
+    /// For example, if an error has path "port" and prefix is "database",
+    /// the resulting path will be "database.port".
+    pub fn with_path_prefix(self, prefix: &str) -> Self {
+        Self(self.0.map(|e| e.with_path_prefix(prefix)))
     }
 }
 
@@ -893,5 +969,104 @@ mod tests {
         assert_eq!(loc.source, "config.toml");
         assert_eq!(loc.line, Some(10));
         assert_eq!(loc.column, Some(5));
+    }
+
+    #[test]
+    fn test_config_error_with_path_prefix() {
+        // ValidationError
+        let err = ConfigError::ValidationError {
+            path: "port".to_string(),
+            source_location: None,
+            value: None,
+            message: "must be positive".to_string(),
+        };
+        let prefixed = err.with_path_prefix("database");
+        assert_eq!(prefixed.path(), Some("database.port"));
+
+        // MissingField
+        let err = ConfigError::MissingField {
+            path: "host".to_string(),
+            searched_sources: vec![],
+        };
+        let prefixed = err.with_path_prefix("server");
+        assert_eq!(prefixed.path(), Some("server.host"));
+
+        // ParseError
+        let err = ConfigError::ParseError {
+            path: "timeout".to_string(),
+            source_location: SourceLocation::new("config.toml"),
+            expected_type: "integer".to_string(),
+            actual_value: "abc".to_string(),
+            message: "invalid".to_string(),
+        };
+        let prefixed = err.with_path_prefix("connection");
+        assert_eq!(prefixed.path(), Some("connection.timeout"));
+
+        // CrossFieldError
+        let err = ConfigError::CrossFieldError {
+            paths: vec!["start".to_string(), "end".to_string()],
+            message: "invalid range".to_string(),
+        };
+        let prefixed = err.with_path_prefix("schedule");
+        match prefixed {
+            ConfigError::CrossFieldError { paths, .. } => {
+                assert_eq!(paths, vec!["schedule.start", "schedule.end"]);
+            }
+            _ => panic!("Expected CrossFieldError"),
+        }
+
+        // NoSources should remain unchanged
+        let err = ConfigError::NoSources;
+        let prefixed = err.with_path_prefix("any");
+        assert!(prefixed.path().is_none());
+    }
+
+    #[test]
+    fn test_config_error_with_path_prefix_array_index() {
+        // Array index paths should not get a dot separator
+        let err = ConfigError::ValidationError {
+            path: "[0]".to_string(),
+            source_location: None,
+            value: None,
+            message: "invalid".to_string(),
+        };
+        let prefixed = err.with_path_prefix("items");
+        assert_eq!(prefixed.path(), Some("items[0]"));
+    }
+
+    #[test]
+    fn test_config_error_with_path_prefix_empty_path() {
+        // Empty path should just become the prefix
+        let err = ConfigError::ValidationError {
+            path: "".to_string(),
+            source_location: None,
+            value: None,
+            message: "invalid".to_string(),
+        };
+        let prefixed = err.with_path_prefix("config");
+        assert_eq!(prefixed.path(), Some("config"));
+    }
+
+    #[test]
+    fn test_config_errors_with_path_prefix() {
+        let errors = ConfigErrors::from_vec(vec![
+            ConfigError::ValidationError {
+                path: "host".to_string(),
+                source_location: None,
+                value: None,
+                message: "empty".to_string(),
+            },
+            ConfigError::ValidationError {
+                path: "port".to_string(),
+                source_location: None,
+                value: None,
+                message: "invalid".to_string(),
+            },
+        ])
+        .unwrap();
+
+        let prefixed = errors.with_path_prefix("database");
+        let paths: Vec<_> = prefixed.iter().filter_map(|e| e.path()).collect();
+        assert_eq!(paths, vec!["database.host", "database.port"]);
     }
 }

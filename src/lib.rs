@@ -89,7 +89,10 @@ pub use error::{
     SourceErrorKind, SourceLocation,
 };
 pub use source::{merge_config_values, ConfigValues, Source};
-pub use validate::Validate;
+pub use validate::validators;
+pub use validate::{
+    custom, validate_field, validate_nested, validate_optional_nested, Validate, Validator, When,
+};
 pub use value::{ConfigValue, Value};
 
 // Re-export stillwater types that are commonly used
