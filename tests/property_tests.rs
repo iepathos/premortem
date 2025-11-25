@@ -569,7 +569,6 @@ mod error_properties {
         /// through all our construction paths.
         #[test]
         fn config_errors_always_nonempty(errors in arb_config_errors()) {
-            prop_assert!(errors.len() >= 1);
             prop_assert!(!errors.is_empty());
         }
 
