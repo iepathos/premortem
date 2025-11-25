@@ -96,7 +96,8 @@ pub use validate::{
 };
 pub use value::{ConfigValue, Value};
 
-// Re-export TOML source when the feature is enabled
+// Re-export sources
+pub use sources::Env;
 #[cfg(feature = "toml")]
 pub use sources::Toml;
 
