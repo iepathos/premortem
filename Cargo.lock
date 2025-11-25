@@ -656,10 +656,8 @@ dependencies = [
 name = "premortem-derive"
 version = "0.1.0"
 dependencies = [
- "premortem",
  "proc-macro2",
  "quote",
- "stillwater",
  "syn",
 ]
 
