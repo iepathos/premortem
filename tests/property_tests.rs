@@ -829,14 +829,14 @@ mod value_path_properties {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(256))]
 
-        /// Property: get_path on empty path returns the value itself.
+        /// Property: get_path on empty path returns None.
+        ///
+        /// Empty string is not a valid path. If you need the root value,
+        /// use it directly rather than calling get_path("").
         #[test]
-        fn get_empty_path_returns_self(value in arb_value()) {
-            // Empty path should return the value itself
+        fn get_empty_path_returns_none(value in arb_value()) {
             let result = value.get_path("");
-            // Empty path returns None in current implementation
-            // This is correct behavior - empty path is not a valid path
-            prop_assert!(result.is_none() || result == Some(&value));
+            prop_assert!(result.is_none(), "Empty path should return None, got {:?}", result);
         }
 
         /// Property: get_path on Table returns correct nested value.

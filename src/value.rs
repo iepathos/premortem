@@ -87,6 +87,9 @@ impl Value {
     }
 
     /// Get a value by dot-notation path (e.g., "database.host").
+    ///
+    /// Returns `None` for empty paths. If you need the root value, use it directly
+    /// rather than calling `get_path("")`.
     pub fn get_path(&self, path: &str) -> Option<&Value> {
         let parts: Vec<&str> = path.split('.').collect();
         self.get_path_parts(&parts)
