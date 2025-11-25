@@ -604,7 +604,7 @@ mod tests {
     fn test_json_negative_numbers() {
         let env = MockEnv::new().with_file(
             "config.json",
-            r#"{"negative_int": -42, "negative_float": -3.14}"#,
+            r#"{"negative_int": -42, "negative_float": -2.75}"#,
         );
 
         let source = Json::file("config.json");
@@ -616,7 +616,7 @@ mod tests {
         );
         assert_eq!(
             values.get("negative_float").map(|v| v.value.as_float()),
-            Some(Some(-3.14))
+            Some(Some(-2.75))
         );
     }
 }
