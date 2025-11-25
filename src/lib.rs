@@ -71,7 +71,7 @@
 //! - [`error`]: Error types (`ConfigError`, `ConfigErrors`, `ConfigValidation`)
 //! - [`value`]: `Value` enum for intermediate representation
 //! - [`source`]: `Source` trait and `ConfigValues` container
-//! - [`env`]: `ConfigEnv` trait and `MockEnv` for testing
+//! - [`mod@env`]: `ConfigEnv` trait and `MockEnv` for testing
 //! - [`validate`]: `Validate` trait for custom validation
 
 pub mod config;

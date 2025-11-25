@@ -52,7 +52,7 @@ impl Validate for () {
     }
 }
 
-/// Implementation for Option<T> where T: Validate.
+/// Implementation for `Option<T>` where T: Validate.
 ///
 /// None values pass validation; Some values delegate to the inner type.
 impl<T: Validate> Validate for Option<T> {
@@ -64,7 +64,7 @@ impl<T: Validate> Validate for Option<T> {
     }
 }
 
-/// Implementation for Vec<T> where T: Validate.
+/// Implementation for `Vec<T>` where T: Validate.
 ///
 /// Validates all elements and accumulates errors.
 impl<T: Validate> Validate for Vec<T> {
