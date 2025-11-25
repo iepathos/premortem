@@ -116,7 +116,10 @@ fn main() {
                     } else {
                         " (final)"
                     };
-                    println!("    {} [{}] {:?}{}", marker, entry.source, entry.value, note);
+                    println!(
+                        "    {} [{}] {:?}{}",
+                        marker, entry.source, entry.value, note
+                    );
                 }
             }
             println!();

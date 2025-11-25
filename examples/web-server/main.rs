@@ -15,13 +15,7 @@
 //! Override with environment variables:
 //!   SERVER_PORT=8080 SERVER_HOST=0.0.0.0 cargo run
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json,
-    routing::get,
-    Router,
-};
+use axum::{extract::State, http::StatusCode, response::Json, routing::get, Router};
 use premortem::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
@@ -357,7 +351,14 @@ async fn main() {
     println!("Server Configuration:");
     println!("  Host: {}", config.host);
     println!("  Port: {}", config.port);
-    println!("  TLS: {}", if config.tls_cert.is_some() { "enabled" } else { "disabled" });
+    println!(
+        "  TLS: {}",
+        if config.tls_cert.is_some() {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
     println!("  Max Body Size: {} MB", config.max_body_size_mb);
     println!("  Request Timeout: {}s", config.request_timeout_secs);
     println!("  Max Connections: {}", config.max_connections);
@@ -384,8 +385,14 @@ async fn main() {
     println!();
     println!("Available endpoints:");
     println!("  GET /health - Health check");
-    println!("  GET {api_prefix}/ - API root", api_prefix = config.api_prefix);
-    println!("  GET {api_prefix}/config - Configuration info", api_prefix = config.api_prefix);
+    println!(
+        "  GET {api_prefix}/ - API root",
+        api_prefix = config.api_prefix
+    );
+    println!(
+        "  GET {api_prefix}/config - Configuration info",
+        api_prefix = config.api_prefix
+    );
     println!();
 
     // Note: In a real application, you would also set up:
@@ -395,7 +402,9 @@ async fn main() {
     // - CORS middleware using cors_allowed_origins
     // - Rate limiting using rate_limit_requests and rate_limit_window_secs
 
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("Failed to bind");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("Failed to bind");
     axum::serve(listener, app).await.expect("Server error");
 }
 
@@ -484,7 +493,11 @@ mod tests {
 
         if let Validation::Failure(errors) = result {
             // Should accumulate multiple errors
-            assert!(errors.len() >= 4, "Expected at least 4 errors, got {}", errors.len());
+            assert!(
+                errors.len() >= 4,
+                "Expected at least 4 errors, got {}",
+                errors.len()
+            );
         } else {
             panic!("Expected validation failure");
         }
