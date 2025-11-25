@@ -2,6 +2,7 @@ site/
 debtmap.json
 debtmap-after.json
 .metadata/
+.prodigy/validation-result.json
 
 # Rust build artifacts
 /target/
