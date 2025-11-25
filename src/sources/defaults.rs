@@ -726,9 +726,9 @@ mod tests {
 
     #[test]
     fn test_json_to_value_float() {
-        let json = serde_json::json!(3.14);
+        let json = serde_json::json!(1.5);
         let value = json_to_value(&json);
-        assert_eq!(value.as_float(), Some(3.14));
+        assert_eq!(value.as_float(), Some(1.5));
     }
 
     #[test]
