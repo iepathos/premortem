@@ -18,6 +18,7 @@ fn test_empty_struct() {
 }
 
 #[derive(DeriveValidate)]
+#[allow(dead_code)]
 struct SimpleConfig {
     host: String,
     port: u16,
@@ -320,6 +321,7 @@ fn test_optional_nested_some_invalid() {
 // ============================================================================
 
 #[derive(DeriveValidate)]
+#[allow(dead_code)]
 struct SkipConfig {
     #[validate(skip)]
     internal: String,
