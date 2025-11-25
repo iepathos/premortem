@@ -30,6 +30,7 @@ premortem-derive = { path = "premortem-derive" }
 axum = "0.8"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+proptest = "1.5"
 
 [features]
 default = ["toml", "derive"]
