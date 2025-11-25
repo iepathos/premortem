@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn test_primitive_validate() {
         assert!(42i32.validate().is_success());
-        assert!(3.14f64.validate().is_success());
+        assert!(2.71f64.validate().is_success());
         assert!(true.validate().is_success());
         assert!("hello".to_string().validate().is_success());
     }
