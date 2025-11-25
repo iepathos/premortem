@@ -145,6 +145,8 @@ pub use value::{ConfigValue, Value};
 
 // Re-export sources
 pub use sources::Env;
+#[cfg(feature = "json")]
+pub use sources::Json;
 #[cfg(feature = "toml")]
 pub use sources::Toml;
 pub use sources::{Defaults, PartialDefaults};

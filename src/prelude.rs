@@ -153,7 +153,11 @@ pub use crate::source::ConfigValues;
 /// Pure function to merge multiple ConfigValues by priority.
 pub use crate::source::merge_config_values;
 
-/// TOML file configuration source.
+/// JSON file configuration source (requires `json` feature).
+#[cfg(feature = "json")]
+pub use crate::sources::Json;
+
+/// TOML file configuration source (requires `toml` feature).
 #[cfg(feature = "toml")]
 pub use crate::sources::Toml;
 
