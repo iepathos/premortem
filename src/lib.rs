@@ -17,9 +17,8 @@
 //! # Quick Start
 //!
 //! ```ignore
-//! use premortem::{Config, Validate, ConfigValidation};
+//! use premortem::prelude::*;
 //! use serde::Deserialize;
-//! use stillwater::Validation;
 //!
 //! #[derive(Debug, Deserialize)]
 //! struct AppConfig {
@@ -32,17 +31,17 @@
 //!         if self.port > 0 {
 //!             Validation::Success(())
 //!         } else {
-//!             Validation::Failure(ConfigErrors::single(ConfigError::ValidationError {
+//!             Validation::fail_with(ConfigError::ValidationError {
 //!                 path: "port".to_string(),
 //!                 source_location: None,
 //!                 value: Some(self.port.to_string()),
 //!                 message: "port must be positive".to_string(),
-//!             }))
+//!             })
 //!         }
 //!     }
 //! }
 //!
-//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! fn main() -> Result<(), ConfigErrors> {
 //!     let config = Config::<AppConfig>::builder()
 //!         .source(Toml::file("config.toml"))
 //!         .source(Env::new().prefix("APP"))
@@ -51,6 +50,34 @@
 //!     println!("Running on {}:{}", config.host, config.port);
 //!     Ok(())
 //! }
+//! ```
+//!
+//! # Import Patterns
+//!
+//! ## Quick Start (Recommended)
+//!
+//! For most users, import the prelude:
+//!
+//! ```ignore
+//! use premortem::prelude::*;
+//! ```
+//!
+//! ## Selective Imports
+//!
+//! Import only what you need:
+//!
+//! ```ignore
+//! use premortem::{Config, Validate};
+//! use premortem::error::ConfigErrors;
+//! ```
+//!
+//! ## Advanced: Direct Stillwater Access
+//!
+//! For custom sources or advanced patterns:
+//!
+//! ```ignore
+//! use premortem::prelude::*;
+//! use stillwater::Effect;  // Direct stillwater access
 //! ```
 //!
 //! # Architecture
@@ -67,16 +94,30 @@
 //!
 //! # Module Structure
 //!
+//! - [`prelude`]: Convenient re-exports for common usage
 //! - [`config`]: `Config` and `ConfigBuilder` for loading configuration
 //! - [`error`]: Error types (`ConfigError`, `ConfigErrors`, `ConfigValidation`)
 //! - [`value`]: `Value` enum for intermediate representation
 //! - [`source`]: `Source` trait and `ConfigValues` container
 //! - [`mod@env`]: `ConfigEnv` trait and `MockEnv` for testing
 //! - [`validate`]: `Validate` trait for custom validation
+//!
+//! # Stillwater Integration
+//!
+//! Premortem uses these stillwater types:
+//!
+//! | Type | Usage |
+//! |------|-------|
+//! | `Validation<T, E>` | Error accumulation for config errors |
+//! | `NonEmptyVec<T>` | Guaranteed non-empty error lists |
+//! | `Semigroup` | Combining errors from multiple sources |
+//!
+//! These are re-exported from the prelude for convenience.
 
 pub mod config;
 pub mod env;
 pub mod error;
+pub mod prelude;
 pub mod pretty;
 pub mod source;
 pub mod sources;
