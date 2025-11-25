@@ -74,8 +74,8 @@ coverage:
     #!/usr/bin/env bash
     # Ensure rustup's cargo is in PATH (needed for llvm-tools-preview)
     export PATH="$HOME/.cargo/bin:$PATH"
-    echo "Building prodigy binary for integration tests..."
-    cargo build --bin prodigy
+    echo "Building premortem for integration tests..."
+    cargo build
     echo "Cleaning previous coverage data..."
     cargo llvm-cov clean
     echo "Generating code coverage report with llvm-cov..."
@@ -88,8 +88,8 @@ coverage-lcov:
     set -euo pipefail  # Exit on error, undefined variables, and pipe failures
     # Ensure rustup's cargo is in PATH (needed for llvm-tools-preview)
     export PATH="$HOME/.cargo/bin:$PATH"
-    echo "Building prodigy binary for integration tests..."
-    cargo build --bin prodigy
+    echo "Building premortem for integration tests..."
+    cargo build
     echo "Cleaning previous coverage data..."
     cargo llvm-cov clean
     # Ensure target/coverage directory exists
@@ -108,8 +108,8 @@ coverage-check:
     #!/usr/bin/env bash
     # Ensure rustup's cargo is in PATH (needed for llvm-tools-preview)
     export PATH="$HOME/.cargo/bin:$PATH"
-    echo "Building prodigy binary for integration tests..."
-    cargo build --bin prodigy
+    echo "Building premortem for integration tests..."
+    cargo build
     echo "Checking code coverage threshold..."
     cargo llvm-cov clean
     mkdir -p target/coverage
@@ -127,20 +127,18 @@ coverage-check:
 coverage-open: coverage
     open target/coverage/html/index.html
 
-# Analyze the current repository with debtmap using coverage data
+# Analyze the current repository with coverage data
 analyze-self:
     #!/usr/bin/env bash
     # Ensure rustup's cargo is in PATH (needed for llvm-tools-preview)
     export PATH="$HOME/.cargo/bin:$PATH"
-    echo "Building prodigy..."
-    cargo build --bin prodigy
+    echo "Building premortem..."
+    cargo build
     echo "Generating code coverage (lcov format)..."
     cargo llvm-cov clean
     mkdir -p target/coverage
     cargo llvm-cov --all-features --lib --lcov --output-path target/coverage/lcov.info
-    echo "Analyzing current repository with debtmap..."
-    debtmap analyze . --lcov target/coverage/lcov.info -vv
-    echo "Analysis complete!"
+    echo "Coverage report generated at target/coverage/lcov.info"
 
 # Run property-based tests only (if using proptest)
 test-prop:
@@ -297,7 +295,7 @@ test-performance:
 
 # Full CI build pipeline (equivalent to scripts/ci-build.sh)
 ci-build:
-    @echo "Building prodigy..."
+    @echo "Building premortem..."
     @echo "Checking code formatting..."
     cargo fmt --all -- --check
     @echo "Running clippy..."
