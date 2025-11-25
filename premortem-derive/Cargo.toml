@@ -8,6 +8,7 @@ description = "Derive macros for the premortem configuration validation library"
 repository = "https://github.com/iepathos/premortem"
 keywords = ["configuration", "validation", "derive", "macro"]
 categories = ["config", "rust-patterns"]
+readme = "README.md"
 
 [lib]
 proc-macro = true
