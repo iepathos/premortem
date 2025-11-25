@@ -1,0 +1,30 @@
+[package]
+name = "premortem"
+version = "0.1.0"
+edition = "2021"
+authors = ["Glen Baker <iepathos@gmail.com>"]
+license = "MIT"
+description = "A configuration library that performs a premortem on your app's config—finding all the ways it would die before it ever runs"
+repository = "https://github.com/iepathos/premortem"
+keywords = ["configuration", "validation", "config", "settings", "premortem"]
+categories = ["config", "rust-patterns"]
+readme = "README.md"
+
+[dependencies]
+stillwater = { path = "/Users/glen/memento-mori/stillwater" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-test = "0.4"
+
+[features]
+default = ["toml"]
+toml = []
+json = []
+yaml = []
+watch = []
+remote = []
+full = ["toml", "json", "yaml", "watch", "remote"]

@@ -1,0 +1,434 @@
+//! Core Config type and ConfigBuilder.
+//!
+//! This module provides the main entry point for configuring and loading
+//! application configuration using the builder pattern.
+
+use std::marker::PhantomData;
+
+use serde::de::DeserializeOwned;
+use stillwater::Validation;
+
+use crate::env::{ConfigEnv, RealEnv};
+use crate::error::{ConfigError, ConfigErrors};
+use crate::source::{merge_config_values, ConfigValues, Source};
+use crate::validate::Validate;
+
+/// Wrapper around a validated configuration value.
+///
+/// This type ensures that the configuration has been loaded and validated.
+/// It implements `Deref` to provide transparent access to the inner type.
+#[derive(Debug, Clone)]
+pub struct Config<T> {
+    inner: T,
+}
+
+impl<T> Config<T> {
+    /// Create a new Config wrapping an already-validated value.
+    ///
+    /// This is primarily used internally after successful validation.
+    pub fn new(value: T) -> Self {
+        Self { inner: value }
+    }
+
+    /// Get a reference to the inner configuration value.
+    pub fn get(&self) -> &T {
+        &self.inner
+    }
+
+    /// Consume this Config and return the inner value.
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+
+    /// Create a builder for this configuration type.
+    pub fn builder() -> ConfigBuilder<T> {
+        ConfigBuilder::new()
+    }
+}
+
+impl<T> std::ops::Deref for Config<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> AsRef<T> for Config<T> {
+    fn as_ref(&self) -> &T {
+        &self.inner
+    }
+}
+
+/// Builder for loading and validating configuration.
+///
+/// # Example
+///
+/// ```ignore
+/// use premortem::Config;
+///
+/// let config = Config::<AppConfig>::builder()
+///     .source(Toml::file("config.toml"))
+///     .source(Env::new().prefix("APP"))
+///     .build()
+///     .expect("Failed to load config");
+/// ```
+pub struct ConfigBuilder<T> {
+    sources: Vec<Box<dyn Source>>,
+    _marker: PhantomData<T>,
+}
+
+impl<T> Default for ConfigBuilder<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> ConfigBuilder<T> {
+    /// Create a new empty config builder.
+    pub fn new() -> Self {
+        Self {
+            sources: Vec::new(),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Add a configuration source.
+    ///
+    /// Sources are applied in order, with later sources overriding earlier ones.
+    pub fn source<S: Source + 'static>(mut self, source: S) -> Self {
+        self.sources.push(Box::new(source));
+        self
+    }
+
+    /// Build the configuration using the real environment.
+    ///
+    /// This is the main entry point for production use.
+    pub fn build(self) -> Result<Config<T>, ConfigErrors>
+    where
+        T: DeserializeOwned + Validate,
+    {
+        self.build_with_env(&RealEnv::new())
+    }
+
+    /// Build the configuration with a custom environment.
+    ///
+    /// This enables dependency injection for testing.
+    pub fn build_with_env(self, env: &dyn ConfigEnv) -> Result<Config<T>, ConfigErrors>
+    where
+        T: DeserializeOwned + Validate,
+    {
+        // Check for empty sources first (pure validation)
+        if self.sources.is_empty() {
+            return Err(ConfigErrors::single(ConfigError::NoSources));
+        }
+
+        // Collect source names for error messages
+        let source_names: Vec<String> = self.sources.iter().map(|s| s.name().to_string()).collect();
+
+        // Load from all sources, accumulating errors
+        let mut all_values = Vec::with_capacity(self.sources.len());
+        let mut all_errors = Vec::new();
+
+        for source in &self.sources {
+            match source.load(env) {
+                Ok(values) => all_values.push(values),
+                Err(errors) => all_errors.extend(errors.into_iter()),
+            }
+        }
+
+        // If any source failed, return all errors
+        if !all_errors.is_empty() {
+            return Err(ConfigErrors::from_vec(all_errors).unwrap());
+        }
+
+        // Merge all values (pure function)
+        let merged = merge_config_values(all_values);
+
+        // Deserialize (pure function)
+        let config = deserialize_config::<T>(&merged, &source_names)?;
+
+        // Validate (pure function)
+        let validation_result = config.validate();
+
+        match validation_result {
+            Validation::Success(()) => Ok(Config::new(config)),
+            Validation::Failure(errors) => Err(errors),
+        }
+    }
+}
+
+/// Pure function: deserialize ConfigValues into target type T.
+fn deserialize_config<T: DeserializeOwned>(
+    values: &ConfigValues,
+    source_names: &[String],
+) -> Result<T, ConfigErrors> {
+    // Convert ConfigValues to JSON for serde deserialization
+    let json_value = values.to_json();
+
+    serde_json::from_value(json_value).map_err(|e| {
+        // Try to extract the path from the serde error
+        let message = e.to_string();
+
+        // Check if this is a missing field error
+        if message.contains("missing field") {
+            // Extract field name from error message
+            if let Some(start) = message.find('`') {
+                if let Some(end) = message[start + 1..].find('`') {
+                    let field = &message[start + 1..start + 1 + end];
+                    return ConfigErrors::single(ConfigError::MissingField {
+                        path: field.to_string(),
+                        searched_sources: source_names.to_vec(),
+                    });
+                }
+            }
+        }
+
+        ConfigErrors::single(ConfigError::ParseError {
+            path: "(root)".to_string(),
+            source_location: crate::error::SourceLocation::new("merged config"),
+            expected_type: std::any::type_name::<T>().to_string(),
+            actual_value: "(complex)".to_string(),
+            message,
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::env::MockEnv;
+    use crate::error::{ConfigValidation, SourceLocation};
+    use crate::value::Value;
+
+    // A simple test source that returns static values
+    struct StaticSource {
+        name: String,
+        values: ConfigValues,
+    }
+
+    impl StaticSource {
+        fn new(name: &str) -> Self {
+            Self {
+                name: name.to_string(),
+                values: ConfigValues::default(),
+            }
+        }
+
+        fn with_value(mut self, path: &str, value: impl Into<Value>) -> Self {
+            self.values.insert(
+                path.to_string(),
+                crate::value::ConfigValue::new(value, SourceLocation::new(&self.name)),
+            );
+            self
+        }
+    }
+
+    impl Source for StaticSource {
+        fn load(&self, _env: &dyn ConfigEnv) -> Result<ConfigValues, ConfigErrors> {
+            Ok(self.values.clone())
+        }
+
+        fn name(&self) -> &str {
+            &self.name
+        }
+    }
+
+    // Simple config struct for testing
+    #[derive(Debug, serde::Deserialize, PartialEq)]
+    struct SimpleConfig {
+        host: String,
+        port: i64,
+    }
+
+    impl Validate for SimpleConfig {
+        fn validate(&self) -> ConfigValidation<()> {
+            Validation::Success(())
+        }
+    }
+
+    #[test]
+    fn test_config_builder_no_sources() {
+        let result = Config::<SimpleConfig>::builder().build();
+        assert!(result.is_err());
+
+        if let Err(errors) = result {
+            assert!(matches!(errors.first(), ConfigError::NoSources));
+        }
+    }
+
+    #[test]
+    fn test_config_builder_single_source() {
+        let source = StaticSource::new("test")
+            .with_value("host", "localhost")
+            .with_value("port", 8080i64);
+
+        let env = MockEnv::new();
+        let result = Config::<SimpleConfig>::builder()
+            .source(source)
+            .build_with_env(&env);
+
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.host, "localhost");
+        assert_eq!(config.port, 8080);
+    }
+
+    #[test]
+    fn test_config_builder_merging() {
+        let source1 = StaticSource::new("base")
+            .with_value("host", "localhost")
+            .with_value("port", 8080i64);
+
+        let source2 = StaticSource::new("override").with_value("host", "production.example.com");
+
+        let env = MockEnv::new();
+        let result = Config::<SimpleConfig>::builder()
+            .source(source1)
+            .source(source2)
+            .build_with_env(&env);
+
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        // source2 should override host
+        assert_eq!(config.host, "production.example.com");
+        // port should remain from source1
+        assert_eq!(config.port, 8080);
+    }
+
+    #[test]
+    fn test_config_deref() {
+        let config = Config::new(SimpleConfig {
+            host: "test".to_string(),
+            port: 80,
+        });
+
+        // Test Deref
+        assert_eq!(config.host, "test");
+        assert_eq!(config.port, 80);
+
+        // Test get()
+        assert_eq!(config.get().host, "test");
+
+        // Test into_inner()
+        let inner = config.into_inner();
+        assert_eq!(inner.host, "test");
+    }
+
+    // Test with validation
+    #[derive(Debug, serde::Deserialize)]
+    struct ValidatedConfig {
+        port: i64,
+    }
+
+    impl Validate for ValidatedConfig {
+        fn validate(&self) -> ConfigValidation<()> {
+            if self.port > 0 && self.port < 65536 {
+                Validation::Success(())
+            } else {
+                Validation::Failure(ConfigErrors::single(ConfigError::ValidationError {
+                    path: "port".to_string(),
+                    source_location: None,
+                    value: Some(self.port.to_string()),
+                    message: "port must be between 1 and 65535".to_string(),
+                }))
+            }
+        }
+    }
+
+    #[test]
+    fn test_config_validation_pass() {
+        let source = StaticSource::new("test").with_value("port", 8080i64);
+
+        let env = MockEnv::new();
+        let result = Config::<ValidatedConfig>::builder()
+            .source(source)
+            .build_with_env(&env);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_config_validation_fail() {
+        let source = StaticSource::new("test").with_value("port", 70000i64);
+
+        let env = MockEnv::new();
+        let result = Config::<ValidatedConfig>::builder()
+            .source(source)
+            .build_with_env(&env);
+
+        assert!(result.is_err());
+        if let Err(errors) = result {
+            assert!(matches!(
+                errors.first(),
+                ConfigError::ValidationError { .. }
+            ));
+        }
+    }
+
+    // Test error accumulation from multiple sources
+    struct FailingSource {
+        name: String,
+    }
+
+    impl FailingSource {
+        fn new(name: &str) -> Self {
+            Self {
+                name: name.to_string(),
+            }
+        }
+    }
+
+    impl Source for FailingSource {
+        fn load(&self, _env: &dyn ConfigEnv) -> Result<ConfigValues, ConfigErrors> {
+            use crate::error::SourceErrorKind;
+            Err(ConfigErrors::single(ConfigError::SourceError {
+                source_name: self.name.clone(),
+                kind: SourceErrorKind::NotFound {
+                    path: format!("{}.toml", self.name),
+                },
+            }))
+        }
+
+        fn name(&self) -> &str {
+            &self.name
+        }
+    }
+
+    #[test]
+    fn test_error_accumulation_from_sources() {
+        let source1 = FailingSource::new("source1");
+        let source2 = FailingSource::new("source2");
+
+        let env = MockEnv::new();
+        let result = Config::<SimpleConfig>::builder()
+            .source(source1)
+            .source(source2)
+            .build_with_env(&env);
+
+        assert!(result.is_err());
+        if let Err(errors) = result {
+            // Both source errors should be accumulated
+            assert_eq!(errors.len(), 2);
+        }
+    }
+
+    #[test]
+    fn test_missing_field_error() {
+        let source = StaticSource::new("test").with_value("host", "localhost");
+        // Missing "port" field
+
+        let env = MockEnv::new();
+        let result = Config::<SimpleConfig>::builder()
+            .source(source)
+            .build_with_env(&env);
+
+        assert!(result.is_err());
+        if let Err(errors) = result {
+            assert!(matches!(
+                errors.first(),
+                ConfigError::MissingField { path, .. } if path == "port"
+            ));
+        }
+    }
+}
