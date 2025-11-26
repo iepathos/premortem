@@ -641,4 +641,192 @@ mod tests {
             _ => panic!("Expected Reloaded event"),
         }
     }
+
+    #[test]
+    fn test_build_watched_with_file_change() {
+        use crate::sources::Toml;
+        use crate::validate::Validate;
+        use crate::Config;
+        use std::io::Write;
+        use stillwater::Validation;
+
+        #[derive(Debug, Clone, serde::Deserialize)]
+        struct WatchTestConfig {
+            host: String,
+            port: i64,
+        }
+
+        impl Validate for WatchTestConfig {
+            fn validate(&self) -> crate::ConfigValidation<()> {
+                Validation::Success(())
+            }
+        }
+
+        // Create temp directory and config file
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp_dir.path().join("config.toml");
+
+        // Write initial config
+        let initial_config = r#"
+host = "localhost"
+port = 8080
+"#;
+        std::fs::write(&config_path, initial_config).expect("Failed to write initial config");
+
+        // Build watched config
+        let (watched, watcher) = Config::<WatchTestConfig>::builder()
+            .source(Toml::file(&config_path))
+            .build_watched()
+            .expect("Failed to build watched config");
+
+        // Verify initial values
+        let current = watched.current();
+        assert_eq!(current.host, "localhost");
+        assert_eq!(current.port, 8080);
+
+        // Subscribe to events
+        let rx = watcher.subscribe();
+
+        // Wait a bit for the watcher to be fully set up
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Modify the config file
+        let updated_config = r#"
+host = "127.0.0.1"
+port = 9000
+"#;
+        // Use atomic write pattern: write to temp then rename
+        let temp_path = config_path.with_extension("tmp");
+        {
+            let mut file = std::fs::File::create(&temp_path).expect("Failed to create temp config");
+            file.write_all(updated_config.as_bytes())
+                .expect("Failed to write");
+            file.sync_all().expect("Failed to sync");
+        }
+        std::fs::rename(&temp_path, &config_path).expect("Failed to rename");
+
+        // Wait for reload event with timeout
+        let mut reloaded = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+
+        while std::time::Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(ConfigEvent::Reloaded { .. }) => {
+                    reloaded = true;
+                    break;
+                }
+                Ok(ConfigEvent::SourceChanged { .. }) => {
+                    // File change detected, continue waiting for reload
+                    continue;
+                }
+                Ok(_) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        assert!(reloaded, "Config should have been reloaded");
+
+        // Verify config was updated
+        let updated = watched.current();
+        assert_eq!(updated.host, "127.0.0.1");
+        assert_eq!(updated.port, 9000);
+
+        // Stop the watcher
+        watcher.stop();
+    }
+
+    #[test]
+    fn test_build_watched_reload_failure_keeps_old_config() {
+        use crate::error::ConfigValidationExt;
+        use crate::sources::Toml;
+        use crate::validate::Validate;
+        use crate::Config;
+        use std::io::Write;
+        use stillwater::Validation;
+
+        #[derive(Debug, Clone, serde::Deserialize)]
+        struct ValidatedConfig {
+            host: String,
+            port: i64,
+        }
+
+        impl Validate for ValidatedConfig {
+            fn validate(&self) -> crate::ConfigValidation<()> {
+                if self.port > 0 {
+                    Validation::Success(())
+                } else {
+                    Validation::fail_with(crate::ConfigError::ValidationError {
+                        path: "port".to_string(),
+                        source_location: None,
+                        value: Some(self.port.to_string()),
+                        message: "port must be positive".to_string(),
+                    })
+                }
+            }
+        }
+
+        // Create temp directory and config file
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp_dir.path().join("config.toml");
+
+        // Write initial valid config
+        let initial_config = r#"
+host = "localhost"
+port = 8080
+"#;
+        std::fs::write(&config_path, initial_config).expect("Failed to write initial config");
+
+        // Build watched config
+        let (watched, watcher) = Config::<ValidatedConfig>::builder()
+            .source(Toml::file(&config_path))
+            .build_watched()
+            .expect("Failed to build watched config");
+
+        // Subscribe to events
+        let rx = watcher.subscribe();
+
+        // Wait a bit for the watcher to be fully set up
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Write invalid config (port = 0 fails validation)
+        let invalid_config = r#"
+host = "invalid-host"
+port = 0
+"#;
+        let temp_path = config_path.with_extension("tmp");
+        {
+            let mut file = std::fs::File::create(&temp_path).expect("Failed to create temp config");
+            file.write_all(invalid_config.as_bytes())
+                .expect("Failed to write");
+            file.sync_all().expect("Failed to sync");
+        }
+        std::fs::rename(&temp_path, &config_path).expect("Failed to rename");
+
+        // Wait for reload failure event
+        let mut reload_failed = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+
+        while std::time::Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(ConfigEvent::ReloadFailed { errors }) => {
+                    assert!(!errors.is_empty(), "Should have validation errors");
+                    reload_failed = true;
+                    break;
+                }
+                Ok(_) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        assert!(reload_failed, "Should have received ReloadFailed event");
+
+        // Verify OLD config is still in place (not the invalid one)
+        let current = watched.current();
+        assert_eq!(current.host, "localhost", "Should keep old host");
+        assert_eq!(current.port, 8080, "Should keep old port");
+
+        watcher.stop();
+    }
 }

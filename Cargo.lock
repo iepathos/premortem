@@ -644,6 +644,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stillwater",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-test",
