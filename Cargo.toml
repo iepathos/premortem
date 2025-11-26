@@ -22,6 +22,7 @@ thiserror = "1.0"
 regex = "1.10"
 toml = { version = "0.8", optional = true }
 toml_edit = { version = "0.22", optional = true }
+serde_yaml = { version = "0.9", optional = true }
 notify = { version = "6.1", optional = true }
 
 [dev-dependencies]
@@ -39,7 +40,7 @@ default = ["toml", "derive"]
 derive = ["premortem-derive"]
 toml = ["dep:toml", "dep:toml_edit"]
 json = []
-yaml = []
+yaml = ["dep:serde_yaml"]
 watch = ["dep:notify"]
 remote = []
 full = ["toml", "json", "yaml", "watch", "remote", "derive"]

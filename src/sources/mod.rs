@@ -9,6 +9,8 @@ mod env_source;
 mod json_source;
 #[cfg(feature = "toml")]
 mod toml_source;
+#[cfg(feature = "yaml")]
+mod yaml_source;
 
 pub use defaults::{Defaults, PartialDefaults};
 pub use env_source::Env;
@@ -16,6 +18,8 @@ pub use env_source::Env;
 pub use json_source::Json;
 #[cfg(feature = "toml")]
 pub use toml_source::Toml;
+#[cfg(feature = "yaml")]
+pub use yaml_source::Yaml;
 
 /// Calculate line number from byte offset (1-indexed).
 /// Pure function used by file-based sources for line tracking.
