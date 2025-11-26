@@ -728,9 +728,7 @@ database:
 
         // Alias value should be resolved to the anchor value
         assert_eq!(
-            values
-                .get("database.timeout")
-                .map(|v| v.value.as_integer()),
+            values.get("database.timeout").map(|v| v.value.as_integer()),
             Some(Some(30))
         );
         assert_eq!(

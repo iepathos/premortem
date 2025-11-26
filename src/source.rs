@@ -70,7 +70,7 @@ impl ConfigValues {
     /// Transforms flat paths like "database.host" into nested JSON:
     /// `{"database": {"host": "..."}}`
     ///
-    /// Also handles array notation like "hosts[0]" -> `{"hosts": ["..."]}`
+    /// Also handles array notation like `hosts[0]` -> `{"hosts": ["..."]}`
     pub fn to_json(&self) -> serde_json::Value {
         let mut root = serde_json::Value::Object(serde_json::Map::new());
 
