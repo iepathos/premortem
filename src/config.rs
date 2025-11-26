@@ -326,6 +326,7 @@ fn deserialize_config<T: DeserializeOwned>(
                     let field = &message[start + 1..start + 1 + end];
                     return ConfigErrors::single(ConfigError::MissingField {
                         path: field.to_string(),
+                        source_location: None,
                         searched_sources: source_names.to_vec(),
                     });
                 }

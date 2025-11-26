@@ -505,6 +505,7 @@ mod tests {
         ConfigErrors::from_vec(vec![
             ConfigError::MissingField {
                 path: "database.host".to_string(),
+                source_location: None,
                 searched_sources: vec!["config.toml".to_string(), "env".to_string()],
             },
             ConfigError::ParseError {
@@ -546,6 +547,7 @@ mod tests {
     fn test_format_missing_field() {
         let errors = ConfigErrors::single(ConfigError::MissingField {
             path: "host".to_string(),
+            source_location: None,
             searched_sources: vec!["config.toml".to_string()],
         });
         let output = errors.format(&PrettyPrintOptions::no_color());
@@ -660,22 +662,27 @@ mod tests {
         let errors = ConfigErrors::from_vec(vec![
             ConfigError::MissingField {
                 path: "field1".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             },
             ConfigError::MissingField {
                 path: "field2".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             },
             ConfigError::MissingField {
                 path: "field3".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             },
             ConfigError::MissingField {
                 path: "field4".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             },
             ConfigError::MissingField {
                 path: "field5".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             },
         ])
@@ -697,14 +704,17 @@ mod tests {
         let errors = ConfigErrors::from_vec(vec![
             ConfigError::MissingField {
                 path: "field1".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             },
             ConfigError::MissingField {
                 path: "field2".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             },
             ConfigError::MissingField {
                 path: "field3".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             },
         ])
@@ -723,6 +733,7 @@ mod tests {
         let errors = ConfigErrors::from_vec(vec![
             ConfigError::MissingField {
                 path: "database.host".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             },
             ConfigError::UnknownField {
@@ -744,6 +755,7 @@ mod tests {
     fn test_no_suggestions_when_disabled() {
         let errors = ConfigErrors::single(ConfigError::MissingField {
             path: "database.host".to_string(),
+            source_location: None,
             searched_sources: vec![],
         });
 

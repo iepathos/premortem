@@ -145,6 +145,7 @@ pub enum ConfigError {
     /// A required field is missing
     MissingField {
         path: String,
+        source_location: Option<SourceLocation>,
         searched_sources: Vec<String>,
     },
 
@@ -190,6 +191,9 @@ impl ConfigError {
             ConfigError::ParseError {
                 source_location, ..
             } => Some(source_location),
+            ConfigError::MissingField {
+                source_location, ..
+            } => source_location.as_ref(),
             ConfigError::ValidationError {
                 source_location, ..
             } => source_location.as_ref(),
@@ -267,9 +271,11 @@ impl ConfigError {
             },
             ConfigError::MissingField {
                 path,
+                source_location,
                 searched_sources,
             } => ConfigError::MissingField {
                 path: prefix_path(prefix, &path),
+                source_location,
                 searched_sources,
             },
             ConfigError::ValidationError {
@@ -318,15 +324,17 @@ impl fmt::Display for ConfigError {
         match self {
             ConfigError::MissingField {
                 path,
+                source_location,
                 searched_sources,
-            } => {
-                write!(
+            } => match source_location {
+                Some(loc) => write!(f, "[{}] missing required field '{}'", loc, path),
+                None => write!(
                     f,
                     "missing required field '{}' (searched: {})",
                     path,
                     searched_sources.join(", ")
-                )
-            }
+                ),
+            },
             ConfigError::ParseError {
                 path,
                 source_location,
@@ -531,6 +539,7 @@ mod tests {
     fn test_config_error_path() {
         let err = ConfigError::MissingField {
             path: "database.host".to_string(),
+            source_location: None,
             searched_sources: vec!["config.toml".to_string()],
         };
         assert_eq!(err.path(), Some("database.host"));
@@ -551,6 +560,7 @@ mod tests {
         let e1 = ConfigErrors::single(ConfigError::NoSources);
         let e2 = ConfigErrors::single(ConfigError::MissingField {
             path: "host".to_string(),
+            source_location: None,
             searched_sources: vec![],
         });
         let combined = e1.combine(e2);
@@ -581,6 +591,7 @@ mod tests {
             },
             ConfigError::MissingField {
                 path: "database.url".to_string(),
+                source_location: None,
                 searched_sources: vec!["config.toml".to_string(), "env".to_string()],
             },
         ])
@@ -598,10 +609,12 @@ mod tests {
         let a = ConfigErrors::single(ConfigError::NoSources);
         let b = ConfigErrors::single(ConfigError::MissingField {
             path: "host".to_string(),
+            source_location: None,
             searched_sources: vec!["config.toml".to_string()],
         });
         let c = ConfigErrors::single(ConfigError::MissingField {
             path: "port".to_string(),
+            source_location: None,
             searched_sources: vec!["env".to_string()],
         });
 
@@ -657,14 +670,26 @@ mod tests {
 
     #[test]
     fn test_config_error_display_all_variants() {
-        // MissingField
+        // MissingField without source location
         let err = ConfigError::MissingField {
             path: "db.host".to_string(),
+            source_location: None,
             searched_sources: vec!["config.toml".to_string(), "env".to_string()],
         };
         assert_eq!(
             format!("{}", err),
             "missing required field 'db.host' (searched: config.toml, env)"
+        );
+
+        // MissingField with source location
+        let err = ConfigError::MissingField {
+            path: "database.host".to_string(),
+            source_location: Some(SourceLocation::new("config.toml").with_line(8)),
+            searched_sources: vec!["config.toml".to_string()],
+        };
+        assert_eq!(
+            format!("{}", err),
+            "[config.toml:8] missing required field 'database.host'"
         );
 
         // ParseError
@@ -769,9 +794,20 @@ mod tests {
 
         let err = ConfigError::MissingField {
             path: "host".to_string(),
+            source_location: None,
             searched_sources: vec![],
         };
         assert!(err.source_location().is_none());
+
+        // MissingField with source location
+        let err = ConfigError::MissingField {
+            path: "host".to_string(),
+            source_location: Some(SourceLocation::new("config.toml").with_line(5)),
+            searched_sources: vec![],
+        };
+        assert!(err.source_location().is_some());
+        assert_eq!(err.source_location().unwrap().source, "config.toml");
+        assert_eq!(err.source_location().unwrap().line, Some(5));
     }
 
     #[test]
@@ -814,6 +850,7 @@ mod tests {
 
         let missing_field = ConfigError::MissingField {
             path: "database.url".to_string(),
+            source_location: None,
             searched_sources: vec![],
         };
         assert_eq!(
@@ -895,6 +932,7 @@ mod tests {
             ConfigError::NoSources,
             ConfigError::MissingField {
                 path: "host".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             },
         ])
@@ -911,6 +949,7 @@ mod tests {
             ConfigError::NoSources,
             ConfigError::MissingField {
                 path: "host".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             },
         ])
@@ -946,6 +985,7 @@ mod tests {
             ConfigError::NoSources,
             ConfigError::MissingField {
                 path: "host".to_string(),
+                source_location: None,
                 searched_sources: vec!["config.toml".to_string()],
             },
         ])
@@ -986,6 +1026,7 @@ mod tests {
         // MissingField
         let err = ConfigError::MissingField {
             path: "host".to_string(),
+            source_location: None,
             searched_sources: vec![],
         };
         let prefixed = err.with_path_prefix("server");
