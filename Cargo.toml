@@ -21,6 +21,7 @@ serde_json = "1.0"
 thiserror = "1.0"
 regex = "1.10"
 toml = { version = "0.8", optional = true }
+toml_edit = { version = "0.22", optional = true }
 notify = { version = "6.1", optional = true }
 
 [dev-dependencies]
@@ -35,7 +36,7 @@ proptest = "1.5"
 [features]
 default = ["toml", "derive"]
 derive = ["premortem-derive"]
-toml = ["dep:toml"]
+toml = ["dep:toml", "dep:toml_edit"]
 json = []
 yaml = []
 watch = ["dep:notify"]

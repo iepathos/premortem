@@ -139,7 +139,8 @@ pub use source::{merge_config_values, ConfigValues, Source};
 pub use trace::{TraceBuilder, TracedConfig, TracedValue, ValueTrace};
 pub use validate::validators;
 pub use validate::{
-    custom, validate_field, validate_nested, validate_optional_nested, Validate, Validator, When,
+    current_source_location, custom, validate_field, validate_nested, validate_optional_nested,
+    with_validation_context, SourceLocationMap, Validate, ValidationContext, Validator, When,
 };
 pub use value::{ConfigValue, Value};
 

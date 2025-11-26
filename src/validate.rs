@@ -4,6 +4,7 @@
 //! - The `Validate` trait that configuration types implement
 //! - The `Validator` trait for composable validation functions
 //! - Built-in validators for common patterns (strings, numbers, paths, collections)
+//! - `ValidationContext` for source location lookup during validation
 //!
 //! # Stillwater Integration
 //!
@@ -33,9 +34,79 @@
 //! }
 //! ```
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use stillwater::Validation;
 
-use crate::error::{ConfigError, ConfigErrors, ConfigValidation};
+use crate::error::{ConfigError, ConfigErrors, ConfigValidation, SourceLocation};
+
+// ============================================================================
+// Validation Context (for source location lookup)
+// ============================================================================
+
+/// Map from config path to source location.
+pub type SourceLocationMap = HashMap<String, SourceLocation>;
+
+/// Context for validation with source location lookup.
+///
+/// This context is populated from `ConfigValues` during config building and
+/// made available to validation code via thread-local storage. This enables
+/// validation errors to include accurate source locations without changing
+/// the `Validate` trait signature.
+#[derive(Debug, Default)]
+pub struct ValidationContext {
+    locations: SourceLocationMap,
+}
+
+impl ValidationContext {
+    /// Create a new validation context with the given source locations.
+    pub fn new(locations: SourceLocationMap) -> Self {
+        Self { locations }
+    }
+
+    /// Look up the source location for a config path.
+    pub fn location_for(&self, path: &str) -> Option<&SourceLocation> {
+        self.locations.get(path)
+    }
+}
+
+// Thread-local storage for validation context.
+// This is pragmatic (per stillwater philosophy) - it avoids breaking the Validate trait API
+// while still enabling source location lookup from generated validation code.
+thread_local! {
+    static VALIDATION_CONTEXT: RefCell<Option<ValidationContext>> = const { RefCell::new(None) };
+}
+
+/// Run a function with a validation context set.
+///
+/// The context is set for the duration of the function and cleared afterward.
+/// This is used by `ConfigBuilder` to provide source locations during validation.
+pub fn with_validation_context<F, R>(ctx: ValidationContext, f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    VALIDATION_CONTEXT.with(|cell| {
+        *cell.borrow_mut() = Some(ctx);
+    });
+    let result = f();
+    VALIDATION_CONTEXT.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+    result
+}
+
+/// Look up the source location for a config path from the current context.
+///
+/// Returns `None` if no context is set or if the path is not found.
+/// This is used by generated validation code to attach source locations to errors.
+pub fn current_source_location(path: &str) -> Option<SourceLocation> {
+    VALIDATION_CONTEXT.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|ctx| ctx.location_for(path).cloned())
+    })
+}
 
 /// Trait for validating configuration values.
 ///
@@ -1632,5 +1703,75 @@ mod tests {
             assert!(paths.contains(&"[1].value"));
             assert!(paths.contains(&"[2].value"));
         }
+    }
+
+    // ========================================================================
+    // ValidationContext Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validation_context_lookup() {
+        let mut locations = SourceLocationMap::new();
+        locations.insert(
+            "host".to_string(),
+            SourceLocation::new("config.toml").with_line(5),
+        );
+        locations.insert(
+            "port".to_string(),
+            SourceLocation::new("config.toml").with_line(6),
+        );
+
+        let ctx = ValidationContext::new(locations);
+
+        let host_loc = ctx.location_for("host").unwrap();
+        assert_eq!(host_loc.source, "config.toml");
+        assert_eq!(host_loc.line, Some(5));
+
+        let port_loc = ctx.location_for("port").unwrap();
+        assert_eq!(port_loc.line, Some(6));
+
+        // Non-existent path returns None
+        assert!(ctx.location_for("missing").is_none());
+    }
+
+    #[test]
+    fn test_with_validation_context() {
+        let mut locations = SourceLocationMap::new();
+        locations.insert(
+            "test_field".to_string(),
+            SourceLocation::new("test.toml").with_line(10),
+        );
+
+        let ctx = ValidationContext::new(locations);
+
+        // Before context is set, returns None
+        assert!(current_source_location("test_field").is_none());
+
+        // Within context, returns location
+        let result = with_validation_context(ctx, || {
+            let loc = current_source_location("test_field");
+            assert!(loc.is_some());
+            let loc = loc.unwrap();
+            assert_eq!(loc.source, "test.toml");
+            assert_eq!(loc.line, Some(10));
+            "success"
+        });
+
+        assert_eq!(result, "success");
+
+        // After context is cleared, returns None again
+        assert!(current_source_location("test_field").is_none());
+    }
+
+    #[test]
+    fn test_context_clears_on_completion() {
+        let mut locations = SourceLocationMap::new();
+        locations.insert("field".to_string(), SourceLocation::new("a.toml"));
+
+        let ctx = ValidationContext::new(locations);
+        with_validation_context(ctx, || ());
+
+        // Context should be cleared
+        assert!(current_source_location("field").is_none());
     }
 }

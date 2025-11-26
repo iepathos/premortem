@@ -30,9 +30,12 @@
 
 use std::path::PathBuf;
 
+use toml_edit::{ImDocument, Item};
+
 use crate::env::ConfigEnv;
 use crate::error::{ConfigError, ConfigErrors, SourceErrorKind, SourceLocation};
 use crate::source::{ConfigValues, Source};
+use crate::sources::line_from_offset;
 use crate::value::{ConfigValue, Value};
 
 /// The source type for TOML configuration.
@@ -224,56 +227,71 @@ impl Source for Toml {
 
 /// Pure function: parse TOML content into ConfigValues.
 /// No I/O - this runs after the Effect has read the file.
+/// Uses toml_edit's ImDocument to capture line numbers for each value.
 fn parse_toml(content: &str, source_name: &str) -> Result<ConfigValues, ConfigErrors> {
-    let document: toml::Value = content.parse().map_err(|e: toml::de::Error| {
-        // Extract line/column from the TOML error
-        let span = e.span();
-        let (line, column) = span
-            .map(|s| {
-                // Calculate line and column from byte offset
-                let before = &content[..s.start.min(content.len())];
-                let line = before.lines().count() as u32;
-                let last_newline = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
-                let column = (s.start - last_newline + 1) as u32;
-                (Some(line), Some(column))
+    // Use ImDocument to preserve span information (DocumentMut loses span info)
+    let document: ImDocument<&str> =
+        ImDocument::parse(content).map_err(|e: toml_edit::TomlError| {
+            // Extract line/column from the parse error
+            let span = e.span();
+            let (line, column) = span
+                .map(|s| {
+                    let line = line_from_offset(content, s.start);
+                    let last_newline = content[..s.start.min(content.len())]
+                        .rfind('\n')
+                        .map(|p| p + 1)
+                        .unwrap_or(0);
+                    let column = (s.start - last_newline + 1) as u32;
+                    (Some(line), Some(column))
+                })
+                .unwrap_or((None, None));
+
+            ConfigErrors::single(ConfigError::SourceError {
+                source_name: source_name.to_string(),
+                kind: SourceErrorKind::ParseError {
+                    message: e.message().to_string(),
+                    line,
+                    column,
+                },
             })
-            .unwrap_or((None, None));
+        })?;
 
-        ConfigErrors::single(ConfigError::SourceError {
-            source_name: source_name.to_string(),
-            kind: SourceErrorKind::ParseError {
-                message: e.message().to_string(),
-                line,
-                column,
-            },
-        })
-    })?;
-
-    // Pure transformation: TOML -> ConfigValues
+    // Pure transformation: TOML -> ConfigValues with line tracking
     let mut values = ConfigValues::empty();
-    flatten_value(&document, "", source_name, &mut values);
+    flatten_document(document.as_item(), "", source_name, content, &mut values);
     Ok(values)
 }
 
-/// Pure function: recursively flatten TOML structure to dot-notation paths.
-fn flatten_value(value: &toml::Value, prefix: &str, source_name: &str, values: &mut ConfigValues) {
-    match value {
-        toml::Value::Table(table) => {
-            for (key, val) in table {
+/// Pure function: recursively flatten toml_edit document to dot-notation paths.
+/// Uses span information from toml_edit to track line numbers.
+fn flatten_document(
+    item: &Item,
+    prefix: &str,
+    source_name: &str,
+    content: &str,
+    values: &mut ConfigValues,
+) {
+    match item {
+        Item::Table(table) => {
+            for (key, val) in table.iter() {
                 let path = if prefix.is_empty() {
-                    key.clone()
+                    key.to_string()
                 } else {
                     format!("{}.{}", prefix, key)
                 };
-                flatten_value(val, &path, source_name, values);
+                flatten_document(val, &path, source_name, content, values);
             }
         }
-        toml::Value::Array(arr) => {
-            for (i, val) in arr.iter().enumerate() {
+        Item::ArrayOfTables(arr) => {
+            for (i, table) in arr.iter().enumerate() {
                 let path = format!("{}[{}]", prefix, i);
-                flatten_value(val, &path, source_name, values);
+                // Wrap table in Item to recurse
+                for (key, val) in table.iter() {
+                    let nested_path = format!("{}.{}", path, key);
+                    flatten_document(val, &nested_path, source_name, content, values);
+                }
             }
-            // Also store array length for validation
+            // Store array length
             values.insert(
                 format!("{}.__len", prefix),
                 ConfigValue::new(
@@ -282,26 +300,72 @@ fn flatten_value(value: &toml::Value, prefix: &str, source_name: &str, values: &
                 ),
             );
         }
-        _ => {
-            let config_value =
-                ConfigValue::new(toml_to_value(value), SourceLocation::new(source_name));
-            values.insert(prefix.to_string(), config_value);
+        Item::Value(v) => {
+            // Extract line number from span
+            let line = v.span().map(|s| line_from_offset(content, s.start));
+            let mut loc = SourceLocation::new(source_name);
+            if let Some(l) = line {
+                loc = loc.with_line(l);
+            }
+
+            // Handle arrays within values
+            if let Some(arr) = v.as_array() {
+                for (i, item) in arr.iter().enumerate() {
+                    let item_path = format!("{}[{}]", prefix, i);
+                    let item_line = item.span().map(|s| line_from_offset(content, s.start));
+                    let mut item_loc = SourceLocation::new(source_name);
+                    if let Some(l) = item_line {
+                        item_loc = item_loc.with_line(l);
+                    }
+                    values.insert(
+                        item_path,
+                        ConfigValue::new(toml_edit_value_to_value(item), item_loc),
+                    );
+                }
+                // Store array length
+                values.insert(
+                    format!("{}.__len", prefix),
+                    ConfigValue::new(Value::Integer(arr.len() as i64), loc),
+                );
+            } else if let Some(table) = v.as_inline_table() {
+                // Handle inline tables
+                for (key, val) in table.iter() {
+                    let nested_path = format!("{}.{}", prefix, key);
+                    let item_line = val.span().map(|s| line_from_offset(content, s.start));
+                    let mut item_loc = SourceLocation::new(source_name);
+                    if let Some(l) = item_line {
+                        item_loc = item_loc.with_line(l);
+                    }
+                    values.insert(
+                        nested_path,
+                        ConfigValue::new(toml_edit_value_to_value(val), item_loc),
+                    );
+                }
+            } else {
+                values.insert(
+                    prefix.to_string(),
+                    ConfigValue::new(toml_edit_value_to_value(v), loc),
+                );
+            }
         }
+        Item::None => {}
     }
 }
 
-/// Convert a toml::Value to our Value type.
-fn toml_to_value(toml: &toml::Value) -> Value {
-    match toml {
-        toml::Value::String(s) => Value::String(s.clone()),
-        toml::Value::Integer(i) => Value::Integer(*i),
-        toml::Value::Float(f) => Value::Float(*f),
-        toml::Value::Boolean(b) => Value::Bool(*b),
-        toml::Value::Datetime(dt) => Value::String(dt.to_string()),
-        toml::Value::Array(arr) => Value::Array(arr.iter().map(toml_to_value).collect()),
-        toml::Value::Table(t) => Value::Table(
+/// Convert a toml_edit::Value to our Value type.
+fn toml_edit_value_to_value(v: &toml_edit::Value) -> Value {
+    match v {
+        toml_edit::Value::String(s) => Value::String(s.value().to_string()),
+        toml_edit::Value::Integer(i) => Value::Integer(*i.value()),
+        toml_edit::Value::Float(f) => Value::Float(*f.value()),
+        toml_edit::Value::Boolean(b) => Value::Bool(*b.value()),
+        toml_edit::Value::Datetime(dt) => Value::String(dt.to_string()),
+        toml_edit::Value::Array(arr) => {
+            Value::Array(arr.iter().map(toml_edit_value_to_value).collect())
+        }
+        toml_edit::Value::InlineTable(t) => Value::Table(
             t.iter()
-                .map(|(k, v)| (k.clone(), toml_to_value(v)))
+                .map(|(k, v)| (k.to_string(), toml_edit_value_to_value(v)))
                 .collect(),
         ),
     }
@@ -633,5 +697,48 @@ mod tests {
 
         let host_value = values.get("host").expect("host should exist");
         assert_eq!(host_value.source.source, "config.toml");
+    }
+
+    #[test]
+    fn test_toml_line_number_tracking() {
+        let env = MockEnv::new().with_file(
+            "config.toml",
+            "host = \"localhost\"\nport = 8080\ndebug = true",
+        );
+
+        let source = Toml::file("config.toml");
+        let values = source.load(&env).expect("should load successfully");
+
+        // host is on line 1
+        let host_value = values.get("host").expect("host should exist");
+        assert_eq!(host_value.source.source, "config.toml");
+        assert_eq!(host_value.source.line, Some(1));
+
+        // port is on line 2
+        let port_value = values.get("port").expect("port should exist");
+        assert_eq!(port_value.source.line, Some(2));
+
+        // debug is on line 3
+        let debug_value = values.get("debug").expect("debug should exist");
+        assert_eq!(debug_value.source.line, Some(3));
+    }
+
+    #[test]
+    fn test_toml_nested_table_line_tracking() {
+        let env = MockEnv::new().with_file(
+            "config.toml",
+            "[database]\nhost = \"localhost\"\nport = 5432",
+        );
+
+        let source = Toml::file("config.toml");
+        let values = source.load(&env).expect("should load successfully");
+
+        // database.host is on line 2
+        let host_value = values.get("database.host").expect("host should exist");
+        assert_eq!(host_value.source.line, Some(2));
+
+        // database.port is on line 3
+        let port_value = values.get("database.port").expect("port should exist");
+        assert_eq!(port_value.source.line, Some(3));
     }
 }

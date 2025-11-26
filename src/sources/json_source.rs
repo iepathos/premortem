@@ -30,6 +30,7 @@ use std::path::PathBuf;
 use crate::env::ConfigEnv;
 use crate::error::{ConfigError, ConfigErrors, SourceErrorKind, SourceLocation};
 use crate::source::{ConfigValues, Source};
+use crate::sources::line_from_offset;
 use crate::value::{ConfigValue, Value};
 
 /// The source type for JSON configuration.
@@ -218,6 +219,7 @@ impl Source for Json {
 
 /// Pure function: parse JSON content into ConfigValues.
 /// No I/O - this runs after the Effect has read the file.
+/// Tracks line numbers by searching for key positions in the content.
 fn parse_json(content: &str, source_name: &str) -> Result<ConfigValues, ConfigErrors> {
     let document: serde_json::Value =
         serde_json::from_str(content).map_err(|e: serde_json::Error| {
@@ -232,17 +234,18 @@ fn parse_json(content: &str, source_name: &str) -> Result<ConfigValues, ConfigEr
             })
         })?;
 
-    // Pure transformation: JSON -> ConfigValues
+    // Pure transformation: JSON -> ConfigValues with line tracking
     let mut values = ConfigValues::empty();
-    flatten_value(&document, "", source_name, &mut values);
+    flatten_value_with_lines(&document, "", source_name, content, &mut values);
     Ok(values)
 }
 
-/// Pure function: recursively flatten JSON structure to dot-notation paths.
-fn flatten_value(
+/// Pure function: recursively flatten JSON structure to dot-notation paths with line tracking.
+fn flatten_value_with_lines(
     value: &serde_json::Value,
     prefix: &str,
     source_name: &str,
+    content: &str,
     values: &mut ConfigValues,
 ) {
     match value {
@@ -253,29 +256,56 @@ fn flatten_value(
                 } else {
                     format!("{}.{}", prefix, key)
                 };
-                flatten_value(val, &path, source_name, values);
+                flatten_value_with_lines(val, &path, source_name, content, values);
             }
         }
         serde_json::Value::Array(arr) => {
             for (i, val) in arr.iter().enumerate() {
                 let path = format!("{}[{}]", prefix, i);
-                flatten_value(val, &path, source_name, values);
+                flatten_value_with_lines(val, &path, source_name, content, values);
             }
-            // Also store array length for validation
+            // Store array length with location from parent key
+            let line = find_key_line(content, prefix);
+            let mut loc = SourceLocation::new(source_name);
+            if let Some(l) = line {
+                loc = loc.with_line(l);
+            }
             values.insert(
                 format!("{}.__len", prefix),
-                ConfigValue::new(
-                    Value::Integer(arr.len() as i64),
-                    SourceLocation::new(source_name),
-                ),
+                ConfigValue::new(Value::Integer(arr.len() as i64), loc),
             );
         }
         _ => {
-            let config_value =
-                ConfigValue::new(json_to_value(value), SourceLocation::new(source_name));
-            values.insert(prefix.to_string(), config_value);
+            // Find the line where this key appears
+            let line = find_key_line(content, prefix);
+            let mut loc = SourceLocation::new(source_name);
+            if let Some(l) = line {
+                loc = loc.with_line(l);
+            }
+            values.insert(
+                prefix.to_string(),
+                ConfigValue::new(json_to_value(value), loc),
+            );
         }
     }
+}
+
+/// Find the line where a key appears in JSON content.
+/// Searches for the last segment of a dotted path (e.g., "host" in "database.host").
+fn find_key_line(content: &str, path: &str) -> Option<u32> {
+    // Get the last segment of the path (the actual key name in JSON)
+    let key = path.split('.').next_back().unwrap_or(path);
+    // Strip array index if present
+    let key = key.split('[').next().unwrap_or(key);
+
+    // Search for "key": pattern
+    let pattern = format!("\"{}\"", key);
+
+    // Find the last occurrence in case of duplicates
+    // (we want the most recent one which is likely correct)
+    content
+        .find(&pattern)
+        .map(|offset| line_from_offset(content, offset))
 }
 
 /// Convert a serde_json::Value to our Value type.
@@ -618,5 +648,48 @@ mod tests {
             values.get("negative_float").map(|v| v.value.as_float()),
             Some(Some(-2.75))
         );
+    }
+
+    #[test]
+    fn test_json_line_number_tracking() {
+        let env = MockEnv::new().with_file(
+            "config.json",
+            "{\n  \"host\": \"localhost\",\n  \"port\": 8080,\n  \"debug\": true\n}",
+        );
+
+        let source = Json::file("config.json");
+        let values = source.load(&env).expect("should load successfully");
+
+        // host is on line 2
+        let host_value = values.get("host").expect("host should exist");
+        assert_eq!(host_value.source.source, "config.json");
+        assert_eq!(host_value.source.line, Some(2));
+
+        // port is on line 3
+        let port_value = values.get("port").expect("port should exist");
+        assert_eq!(port_value.source.line, Some(3));
+
+        // debug is on line 4
+        let debug_value = values.get("debug").expect("debug should exist");
+        assert_eq!(debug_value.source.line, Some(4));
+    }
+
+    #[test]
+    fn test_json_nested_object_line_tracking() {
+        let env = MockEnv::new().with_file(
+            "config.json",
+            "{\n  \"database\": {\n    \"host\": \"localhost\",\n    \"port\": 5432\n  }\n}",
+        );
+
+        let source = Json::file("config.json");
+        let values = source.load(&env).expect("should load successfully");
+
+        // database.host is on line 3
+        let host_value = values.get("database.host").expect("host should exist");
+        assert_eq!(host_value.source.line, Some(3));
+
+        // database.port is on line 4
+        let port_value = values.get("database.port").expect("port should exist");
+        assert_eq!(port_value.source.line, Some(4));
     }
 }

@@ -304,6 +304,7 @@ fn generate_validator_expr(
 }
 
 /// Generate a simple validator call using validate_field.
+/// Attaches source locations from the validation context.
 fn generate_simple_validator(
     field_name: &str,
     validator: TokenStream,
@@ -321,15 +322,16 @@ fn generate_simple_validator(
                 {
                     use ::premortem::validators::*;
                     use ::premortem::Validator;
+                    let source_location = ::premortem::validate::current_source_location(#field_name);
                     let result = (#validator).validate(&#field_ident, #field_name);
                     result.map_err(|errors| {
                         ::premortem::ConfigErrors::from_nonempty(
                             errors.0.map(|e| {
                                 match e {
-                                    ::premortem::ConfigError::ValidationError { path, source_location, .. } => {
+                                    ::premortem::ConfigError::ValidationError { path, .. } => {
                                         ::premortem::ConfigError::ValidationError {
                                             path,
-                                            source_location,
+                                            source_location: source_location.clone(),
                                             value: None, // redacted
                                             message: #msg.to_string(),
                                         }
@@ -346,15 +348,16 @@ fn generate_simple_validator(
                 {
                     use ::premortem::validators::*;
                     use ::premortem::Validator;
+                    let source_location = ::premortem::validate::current_source_location(#field_name);
                     let result = (#validator).validate(&#field_ident, #field_name);
                     result.map_err(|errors| {
                         ::premortem::ConfigErrors::from_nonempty(
                             errors.0.map(|e| {
                                 match e {
-                                    ::premortem::ConfigError::ValidationError { path, source_location, value, .. } => {
+                                    ::premortem::ConfigError::ValidationError { path, value, .. } => {
                                         ::premortem::ConfigError::ValidationError {
                                             path,
-                                            source_location,
+                                            source_location: source_location.clone(),
                                             value,
                                             message: #msg.to_string(),
                                         }
@@ -373,15 +376,16 @@ fn generate_simple_validator(
             {
                 use ::premortem::validators::*;
                 use ::premortem::Validator;
+                let source_location = ::premortem::validate::current_source_location(#field_name);
                 let result = (#validator).validate(&#field_ident, #field_name);
                 result.map_err(|errors| {
                     ::premortem::ConfigErrors::from_nonempty(
                         errors.0.map(|e| {
                             match e {
-                                ::premortem::ConfigError::ValidationError { path, source_location, message, .. } => {
+                                ::premortem::ConfigError::ValidationError { path, message, .. } => {
                                     ::premortem::ConfigError::ValidationError {
                                         path,
-                                        source_location,
+                                        source_location: source_location.clone(),
                                         value: None, // redacted
                                         message,
                                     }
@@ -394,12 +398,30 @@ fn generate_simple_validator(
             }
         }
     } else {
-        // Standard case
+        // Standard case - attach source location from context
         quote! {
             {
                 use ::premortem::validators::*;
                 use ::premortem::Validator;
-                (#validator).validate(&#field_ident, #field_name)
+                let source_location = ::premortem::validate::current_source_location(#field_name);
+                let result = (#validator).validate(&#field_ident, #field_name);
+                result.map_err(|errors| {
+                    ::premortem::ConfigErrors::from_nonempty(
+                        errors.0.map(|e| {
+                            match e {
+                                ::premortem::ConfigError::ValidationError { path, value, message, .. } => {
+                                    ::premortem::ConfigError::ValidationError {
+                                        path,
+                                        source_location: source_location.clone(),
+                                        value,
+                                        message,
+                                    }
+                                }
+                                other => other,
+                            }
+                        })
+                    )
+                })
             }
         }
     }

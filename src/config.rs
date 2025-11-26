@@ -12,7 +12,7 @@ use crate::env::{ConfigEnv, RealEnv};
 use crate::error::{ConfigError, ConfigErrors};
 use crate::source::{merge_config_values, ConfigValues, Source};
 use crate::trace::{TraceBuilder, TracedConfig};
-use crate::validate::Validate;
+use crate::validate::{with_validation_context, Validate, ValidationContext};
 
 /// Wrapper around a validated configuration value.
 ///
@@ -146,11 +146,18 @@ impl<T> ConfigBuilder<T> {
         // Merge all values (pure function)
         let merged = merge_config_values(all_values);
 
+        // Build source location map from merged values for validation context
+        let locations = merged
+            .iter()
+            .map(|(path, cv)| (path.clone(), cv.source.clone()))
+            .collect();
+
         // Deserialize (pure function)
         let config = deserialize_config::<T>(&merged, &source_names)?;
 
-        // Validate (pure function)
-        let validation_result = config.validate();
+        // Validate with context (source locations available for error messages)
+        let ctx = ValidationContext::new(locations);
+        let validation_result = with_validation_context(ctx, || config.validate());
 
         match validation_result {
             Validation::Success(()) => Ok(Config::new(config)),
@@ -290,11 +297,18 @@ impl<T> ConfigBuilder<T> {
         // Merge all values (pure function)
         let merged = merge_config_values(all_values);
 
+        // Build source location map from merged values for validation context
+        let locations = merged
+            .iter()
+            .map(|(path, cv)| (path.clone(), cv.source.clone()))
+            .collect();
+
         // Deserialize (pure function)
         let config = deserialize_config::<T>(&merged, &source_names)?;
 
-        // Validate (pure function)
-        let validation_result = config.validate();
+        // Validate with context (source locations available for error messages)
+        let ctx = ValidationContext::new(locations);
+        let validation_result = with_validation_context(ctx, || config.validate());
 
         match validation_result {
             Validation::Success(()) => {
