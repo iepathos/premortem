@@ -64,202 +64,215 @@ pub struct StructValidation {
     pub custom_fn: Option<String>,
 }
 
+/// Helper for validators that take no arguments.
+fn parse_no_arg_validator(
+    ident: &Ident,
+    content: &Option<ValidatorContent>,
+    validator: ValidatorAttr,
+) -> Result<ValidatorAttr> {
+    if content.is_some() {
+        return Err(Error::new(
+            ident.span(),
+            format!("{} takes no arguments", ident),
+        ));
+    }
+    Ok(validator)
+}
+
+/// Helper for validators that take a single usize argument.
+fn parse_usize_validator(
+    ident: &Ident,
+    content: &Option<ValidatorContent>,
+    constructor: impl FnOnce(usize) -> ValidatorAttr,
+    error_msg: &str,
+) -> Result<ValidatorAttr> {
+    match content {
+        Some(ValidatorContent::SingleArg(expr)) => {
+            let n = parse_usize_expr(expr)?;
+            Ok(constructor(n))
+        }
+        _ => Err(Error::new(ident.span(), error_msg)),
+    }
+}
+
+/// Helper for validators that take a single string argument.
+fn parse_string_validator(
+    ident: &Ident,
+    content: &Option<ValidatorContent>,
+    constructor: impl FnOnce(String) -> ValidatorAttr,
+    error_msg: &str,
+) -> Result<ValidatorAttr> {
+    match content {
+        Some(ValidatorContent::SingleArg(expr)) => {
+            let s = parse_string_expr(expr)?;
+            Ok(constructor(s))
+        }
+        _ => Err(Error::new(ident.span(), error_msg)),
+    }
+}
+
+/// Helper for validators that take a usize range argument.
+fn parse_usize_range_validator(
+    ident: &Ident,
+    content: &Option<ValidatorContent>,
+    constructor: impl FnOnce(usize, usize) -> ValidatorAttr,
+    error_msg: &str,
+) -> Result<ValidatorAttr> {
+    match content {
+        Some(ValidatorContent::SingleArg(expr)) => {
+            let (min, max) = parse_range_expr(expr)?;
+            Ok(constructor(min, max))
+        }
+        _ => Err(Error::new(ident.span(), error_msg)),
+    }
+}
+
+/// Helper for validators that take a string range argument (for numeric ranges).
+fn parse_string_range_validator(
+    ident: &Ident,
+    content: &Option<ValidatorContent>,
+    constructor: impl FnOnce(String, String) -> ValidatorAttr,
+    error_msg: &str,
+) -> Result<ValidatorAttr> {
+    match content {
+        Some(ValidatorContent::SingleArg(expr)) => {
+            let (min, max) = parse_range_strings(expr)?;
+            Ok(constructor(min, max))
+        }
+        _ => Err(Error::new(ident.span(), error_msg)),
+    }
+}
+
+/// Check for common typos and return a helpful error message.
+fn check_typo_suggestion(name: &str, ident: &Ident) -> Option<Error> {
+    let suggestion = match name {
+        "rang" => Some("range"),
+        "nonempty" | "not_empty" => Some("non_empty"),
+        "nonzero" | "not_zero" => Some("non_zero"),
+        "minlength" | "min_len" => Some("min_length"),
+        "maxlength" | "max_len" => Some("max_length"),
+        _ => None,
+    };
+    suggestion.map(|s| {
+        Error::new(
+            ident.span(),
+            format!("unknown validator '{}'; did you mean '{}'?", name, s),
+        )
+    })
+}
+
+/// Parse a nested validator (for `each(validator)`).
+fn parse_nested_validator(
+    ident: &Ident,
+    content: Option<ValidatorContent>,
+) -> Result<ValidatorAttr> {
+    match content {
+        Some(ValidatorContent::NestedValidator(inner_ident, inner_content)) => {
+            let inner = parse_validator(&inner_ident, inner_content.map(|b| *b))?;
+            Ok(ValidatorAttr::Each(Box::new(inner)))
+        }
+        _ => Err(Error::new(
+            ident.span(),
+            "each requires a validator argument like each(non_empty)",
+        )),
+    }
+}
+
+/// Parse a custom validator with name = "value" syntax.
+fn parse_custom_validator(
+    ident: &Ident,
+    content: &Option<ValidatorContent>,
+) -> Result<ValidatorAttr> {
+    match content {
+        Some(ValidatorContent::NameValue(s)) => Ok(ValidatorAttr::Custom(s.clone())),
+        _ => Err(Error::new(
+            ident.span(),
+            "custom requires a function name like custom = \"validate_fn\"",
+        )),
+    }
+}
+
 /// Parse a single validator from the attribute content.
 fn parse_validator(ident: &Ident, content: Option<ValidatorContent>) -> Result<ValidatorAttr> {
     let name = ident.to_string();
 
+    // Handle "each" separately since it needs ownership of content
+    if name == "each" {
+        return parse_nested_validator(ident, content);
+    }
+
     match name.as_str() {
-        // String validators
-        "non_empty" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "non_empty takes no arguments"));
-            }
-            Ok(ValidatorAttr::NonEmpty)
-        }
-        "min_length" => match content {
-            Some(ValidatorContent::SingleArg(expr)) => {
-                let n = parse_usize_expr(&expr)?;
-                Ok(ValidatorAttr::MinLength(n))
-            }
-            _ => Err(Error::new(
-                ident.span(),
-                "min_length requires a single integer argument",
-            )),
-        },
-        "max_length" => match content {
-            Some(ValidatorContent::SingleArg(expr)) => {
-                let n = parse_usize_expr(&expr)?;
-                Ok(ValidatorAttr::MaxLength(n))
-            }
-            _ => Err(Error::new(
-                ident.span(),
-                "max_length requires a single integer argument",
-            )),
-        },
-        "length" => match content {
-            Some(ValidatorContent::SingleArg(expr)) => {
-                let (min, max) = parse_range_expr(&expr)?;
-                Ok(ValidatorAttr::Length(min, max))
-            }
-            _ => Err(Error::new(
-                ident.span(),
-                "length requires a range argument like 3..=100",
-            )),
-        },
-        "pattern" => match content {
-            Some(ValidatorContent::SingleArg(expr)) => {
-                let s = parse_string_expr(&expr)?;
-                Ok(ValidatorAttr::Pattern(s))
-            }
-            _ => Err(Error::new(
-                ident.span(),
-                "pattern requires a string argument",
-            )),
-        },
-        "email" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "email takes no arguments"));
-            }
-            Ok(ValidatorAttr::Email)
-        }
-        "url" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "url takes no arguments"));
-            }
-            Ok(ValidatorAttr::Url)
-        }
-        "ip" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "ip takes no arguments"));
-            }
-            Ok(ValidatorAttr::Ip)
-        }
-        "uuid" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "uuid takes no arguments"));
-            }
-            Ok(ValidatorAttr::Uuid)
-        }
+        // No-argument validators
+        "non_empty" => parse_no_arg_validator(ident, &content, ValidatorAttr::NonEmpty),
+        "email" => parse_no_arg_validator(ident, &content, ValidatorAttr::Email),
+        "url" => parse_no_arg_validator(ident, &content, ValidatorAttr::Url),
+        "ip" => parse_no_arg_validator(ident, &content, ValidatorAttr::Ip),
+        "uuid" => parse_no_arg_validator(ident, &content, ValidatorAttr::Uuid),
+        "positive" => parse_no_arg_validator(ident, &content, ValidatorAttr::Positive),
+        "negative" => parse_no_arg_validator(ident, &content, ValidatorAttr::Negative),
+        "non_zero" => parse_no_arg_validator(ident, &content, ValidatorAttr::NonZero),
+        "file_exists" => parse_no_arg_validator(ident, &content, ValidatorAttr::FileExists),
+        "dir_exists" => parse_no_arg_validator(ident, &content, ValidatorAttr::DirExists),
+        "parent_exists" => parse_no_arg_validator(ident, &content, ValidatorAttr::ParentExists),
+        "nested" => parse_no_arg_validator(ident, &content, ValidatorAttr::Nested),
+        "skip" => parse_no_arg_validator(ident, &content, ValidatorAttr::Skip),
 
-        // Numeric validators
-        "range" => match content {
-            Some(ValidatorContent::SingleArg(expr)) => {
-                let (min, max) = parse_range_strings(&expr)?;
-                Ok(ValidatorAttr::Range(min, max))
-            }
-            _ => Err(Error::new(
-                ident.span(),
-                "range requires a range argument like 1..=65535",
-            )),
-        },
-        "positive" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "positive takes no arguments"));
-            }
-            Ok(ValidatorAttr::Positive)
-        }
-        "negative" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "negative takes no arguments"));
-            }
-            Ok(ValidatorAttr::Negative)
-        }
-        "non_zero" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "non_zero takes no arguments"));
-            }
-            Ok(ValidatorAttr::NonZero)
-        }
+        // Usize argument validators
+        "min_length" => parse_usize_validator(
+            ident,
+            &content,
+            ValidatorAttr::MinLength,
+            "min_length requires a single integer argument",
+        ),
+        "max_length" => parse_usize_validator(
+            ident,
+            &content,
+            ValidatorAttr::MaxLength,
+            "max_length requires a single integer argument",
+        ),
 
-        // Path validators
-        "file_exists" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "file_exists takes no arguments"));
-            }
-            Ok(ValidatorAttr::FileExists)
-        }
-        "dir_exists" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "dir_exists takes no arguments"));
-            }
-            Ok(ValidatorAttr::DirExists)
-        }
-        "parent_exists" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "parent_exists takes no arguments"));
-            }
-            Ok(ValidatorAttr::ParentExists)
-        }
-        "extension" => match content {
-            Some(ValidatorContent::SingleArg(expr)) => {
-                let s = parse_string_expr(&expr)?;
-                Ok(ValidatorAttr::Extension(s))
-            }
-            _ => Err(Error::new(
-                ident.span(),
-                "extension requires a string argument",
-            )),
-        },
+        // String argument validators
+        "pattern" => parse_string_validator(
+            ident,
+            &content,
+            ValidatorAttr::Pattern,
+            "pattern requires a string argument",
+        ),
+        "extension" => parse_string_validator(
+            ident,
+            &content,
+            ValidatorAttr::Extension,
+            "extension requires a string argument",
+        ),
 
-        // Structural validators
-        "nested" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "nested takes no arguments"));
+        // Range validators
+        "length" => parse_usize_range_validator(
+            ident,
+            &content,
+            ValidatorAttr::Length,
+            "length requires a range argument like 3..=100",
+        ),
+        "range" => parse_string_range_validator(
+            ident,
+            &content,
+            ValidatorAttr::Range,
+            "range requires a range argument like 1..=65535",
+        ),
+
+        // Custom validator
+        "custom" => parse_custom_validator(ident, &content),
+
+        // Check for typos or return unknown error
+        _ => {
+            if let Some(err) = check_typo_suggestion(&name, ident) {
+                Err(err)
+            } else {
+                Err(Error::new(
+                    ident.span(),
+                    format!("unknown validator '{}'", name),
+                ))
             }
-            Ok(ValidatorAttr::Nested)
         }
-        "each" => match content {
-            Some(ValidatorContent::NestedValidator(inner_ident, inner_content)) => {
-                let inner = parse_validator(&inner_ident, inner_content.map(|b| *b))?;
-                Ok(ValidatorAttr::Each(Box::new(inner)))
-            }
-            _ => Err(Error::new(
-                ident.span(),
-                "each requires a validator argument like each(non_empty)",
-            )),
-        },
-        "skip" => {
-            if content.is_some() {
-                return Err(Error::new(ident.span(), "skip takes no arguments"));
-            }
-            Ok(ValidatorAttr::Skip)
-        }
-
-        // Custom validators
-        "custom" => match content {
-            Some(ValidatorContent::NameValue(s)) => Ok(ValidatorAttr::Custom(s)),
-            _ => Err(Error::new(
-                ident.span(),
-                "custom requires a function name like custom = \"validate_fn\"",
-            )),
-        },
-
-        // Suggestions for common typos
-        "rang" => Err(Error::new(
-            ident.span(),
-            "unknown validator 'rang'; did you mean 'range'?",
-        )),
-        "nonempty" | "not_empty" => Err(Error::new(
-            ident.span(),
-            format!("unknown validator '{}'; did you mean 'non_empty'?", name),
-        )),
-        "nonzero" | "not_zero" => Err(Error::new(
-            ident.span(),
-            format!("unknown validator '{}'; did you mean 'non_zero'?", name),
-        )),
-        "minlength" | "min_len" => Err(Error::new(
-            ident.span(),
-            format!("unknown validator '{}'; did you mean 'min_length'?", name),
-        )),
-        "maxlength" | "max_len" => Err(Error::new(
-            ident.span(),
-            format!("unknown validator '{}'; did you mean 'max_length'?", name),
-        )),
-
-        _ => Err(Error::new(
-            ident.span(),
-            format!("unknown validator '{}'", name),
-        )),
     }
 }
 
