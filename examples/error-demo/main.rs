@@ -107,11 +107,11 @@ host = "db.example.com"
 port = 5432
 pool_size = -5"#;
 
-    // Env vars override some values with invalid ones
+    // Env var overrides a valid TOML value with an invalid one
+    // This simulates: APP_SERVER_PORT=0 ./myapp
     let env = MockEnv::new()
         .with_file("config.toml", config_toml)
-        .with_env("APP_SERVER_PORT", "0") // Invalid: overrides valid TOML value
-        .with_env("APP_DATABASE_HOST", ""); // Invalid: overrides valid TOML value
+        .with_env("APP_SERVER_PORT", "0"); // Invalid: port 0 fails range validation
 
     let result = Config::<AppConfig>::builder()
         .source(Toml::file("config.toml"))
@@ -164,11 +164,10 @@ host = "db.example.com"
 port = 5432
 pool_size = -5"#;
 
-    // Env vars override some values with invalid ones
+    // Env var overrides valid TOML with invalid value
     let env = MockEnv::new()
         .with_file("config.toml", config_toml)
-        .with_env("APP_SERVER_PORT", "0")
-        .with_env("APP_DATABASE_HOST", "");
+        .with_env("APP_SERVER_PORT", "0");
 
     let result = Config::<AppConfig>::builder()
         .source(Toml::file("config.toml"))
