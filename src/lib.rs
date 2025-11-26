@@ -150,6 +150,8 @@ pub use sources::Env;
 pub use sources::Json;
 #[cfg(feature = "toml")]
 pub use sources::Toml;
+#[cfg(feature = "yaml")]
+pub use sources::Yaml;
 pub use sources::{Defaults, PartialDefaults};
 
 // Re-export watch types
