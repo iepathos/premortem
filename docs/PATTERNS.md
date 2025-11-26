@@ -88,6 +88,7 @@ impl Validate for Config {
             Validation::Failure(ConfigErrors::single(
                 ConfigError::MissingField {
                     path: "database_password".to_string(),
+                    source_location: None,
                     searched_sources: vec!["environment".to_string()],
                 }
             ))

@@ -338,6 +338,7 @@ mod tests {
         let e1 = ConfigErrors::single(ConfigError::NoSources);
         let e2 = ConfigErrors::single(ConfigError::MissingField {
             path: "host".to_string(),
+            source_location: None,
             searched_sources: vec![],
         });
         let combined = e1.combine(e2);
@@ -360,6 +361,7 @@ mod tests {
         let v2: ConfigValidation<i32> =
             Validation::Failure(ConfigErrors::single(ConfigError::MissingField {
                 path: "host".to_string(),
+                source_location: None,
                 searched_sources: vec![],
             }));
 

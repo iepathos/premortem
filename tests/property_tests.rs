@@ -118,11 +118,15 @@ fn arb_config_error() -> impl Strategy<Value = ConfigError> {
         // MissingField
         (
             "[a-z][a-z.]{0,20}",
+            proptest::option::of(arb_source_location()),
             prop::collection::vec("[a-z_]{1,15}\\.toml", 1..3),
         )
-            .prop_map(|(path, searched_sources)| ConfigError::MissingField {
-                path,
-                searched_sources,
+            .prop_map(|(path, source_location, searched_sources)| {
+                ConfigError::MissingField {
+                    path,
+                    source_location,
+                    searched_sources,
+                }
             }),
         // ValidationError
         (
