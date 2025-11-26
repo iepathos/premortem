@@ -168,6 +168,7 @@ let config = Config::<AppConfig>::builder()
 | `NotFound` | Source file was not found |
 | `IoError` | Source file could not be read |
 | `ParseError` | Source content could not be parsed |
+| `ConnectionError` | Remote source failed to connect |
 | `Other` | Other source-specific error |
 
 ## Feature Flags
@@ -177,9 +178,11 @@ let config = Config::<AppConfig>::builder()
 default = ["toml", "derive"]
 toml = []        # TOML file support
 json = []        # JSON file support
+yaml = []        # YAML file support (not yet implemented, see specs/001)
 watch = []       # File watching for hot reload
+remote = []      # Remote configuration sources (not yet implemented, see specs/002)
 derive = []      # Derive macro for Validate trait
-full = ["toml", "json", "watch", "derive"]
+full = ["toml", "json", "yaml", "watch", "remote", "derive"]
 ```
 
 ## Testing Patterns

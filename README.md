@@ -121,9 +121,11 @@ See the [`examples/`](./examples/) directory for runnable examples:
 |---------|-------------|
 | [error-demo](./examples/error-demo/) | Error output with source location tracking |
 | [layered-config](./examples/layered-config/) | Multi-source config with value tracing |
+| [layered](./examples/layered/) | Environment-based layered configuration |
 | [basic](./examples/basic/) | Minimal configuration loading |
 | [validation](./examples/validation/) | Comprehensive validation patterns |
 | [testing](./examples/testing/) | Configuration testing with MockEnv |
+| [tracing](./examples/tracing/) | Value origin tracing demonstration |
 | [web-server](./examples/web-server/) | Axum web server configuration |
 
 Run an example:
