@@ -2,9 +2,11 @@
 
 > Know how your app will die—before it does.
 
+[![CI](https://github.com/iepathos/premortem/actions/workflows/ci.yml/badge.svg)](https://github.com/iepathos/premortem/actions/workflows/ci.yml)
+[![Coverage](https://github.com/iepathos/premortem/actions/workflows/coverage.yml/badge.svg)](https://github.com/iepathos/premortem/actions/workflows/coverage.yml)
+[![Security](https://github.com/iepathos/premortem/actions/workflows/security.yml/badge.svg)](https://github.com/iepathos/premortem/actions/workflows/security.yml)
 [![Crates.io](https://img.shields.io/crates/v/premortem.svg)](https://crates.io/crates/premortem)
 [![Documentation](https://docs.rs/premortem/badge.svg)](https://docs.rs/premortem)
-[![Security](https://github.com/iepathos/premortem/actions/workflows/security.yml/badge.svg)](https://github.com/iepathos/premortem/actions/workflows/security.yml)
 [![License](https://img.shields.io/badge/license-MIT)](LICENSE)
 
 A configuration library that performs a **premortem** on your app's config—finding all the ways it would die before it ever runs.

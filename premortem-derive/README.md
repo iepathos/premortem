@@ -1,8 +1,10 @@
 # premortem-derive
 
+[![CI](https://github.com/iepathos/premortem/actions/workflows/ci.yml/badge.svg)](https://github.com/iepathos/premortem/actions/workflows/ci.yml)
+[![Coverage](https://github.com/iepathos/premortem/actions/workflows/coverage.yml/badge.svg)](https://github.com/iepathos/premortem/actions/workflows/coverage.yml)
+[![Security](https://github.com/iepathos/premortem/actions/workflows/security.yml/badge.svg)](https://github.com/iepathos/premortem/actions/workflows/security.yml)
 [![Crates.io](https://img.shields.io/crates/v/premortem-derive.svg)](https://crates.io/crates/premortem-derive)
 [![Documentation](https://docs.rs/premortem-derive/badge.svg)](https://docs.rs/premortem-derive)
-[![Security](https://github.com/iepathos/premortem/actions/workflows/security.yml/badge.svg)](https://github.com/iepathos/premortem/actions/workflows/security.yml)
 [![License](https://img.shields.io/badge/license-MIT)](../LICENSE)
 
 Derive macros for the [premortem](https://crates.io/crates/premortem) configuration validation library.
