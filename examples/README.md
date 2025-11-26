@@ -127,6 +127,23 @@ cargo run
 SERVER_PORT=8080 SERVER_HOST=0.0.0.0 cargo run
 ```
 
+### [yaml](./yaml/)
+
+**YAML configuration file loading**
+
+Demonstrates loading configuration from YAML files. Shows:
+- YAML file parsing with nested structures
+- Environment variable overrides
+- Validation with error accumulation
+
+```bash
+# From workspace root (requires yaml feature)
+cargo run --example yaml --features yaml
+
+# Override with environment variables:
+APP_PORT=9000 cargo run --example yaml --features yaml
+```
+
 ## Key Concepts Demonstrated
 
 ### Error Accumulation

@@ -1,0 +1,20 @@
+# YAML example configuration file
+#
+# These values can be overridden by environment variables:
+# - APP_HOST overrides host
+# - APP_PORT overrides port
+# - APP_DEBUG overrides debug
+# - APP_DATABASE_HOST overrides database.host
+# - APP_DATABASE_PORT overrides database.port
+# - APP_DATABASE_NAME overrides database.name
+
+host: localhost
+port: 8080
+debug: false
+
+# Nested configuration demonstrating YAML's natural
+# support for hierarchical data structures
+database:
+  host: localhost
+  port: 5432
+  name: myapp

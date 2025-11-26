@@ -128,12 +128,14 @@ See the [`examples/`](./examples/) directory for runnable examples:
 | [tracing](./examples/tracing/) | Value origin tracing demonstration |
 | [watch](./examples/watch/) | Hot reload with automatic file watching |
 | [web-server](./examples/web-server/) | Axum web server configuration |
+| [yaml](./examples/yaml/) | YAML configuration file loading |
 
 Run an example:
 
 ```bash
 cargo run --example error-demo
 cargo run --example layered-config
+cargo run --example yaml --features yaml
 ```
 
 ## Documentation

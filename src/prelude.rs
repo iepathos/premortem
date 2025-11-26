@@ -161,6 +161,10 @@ pub use crate::sources::Json;
 #[cfg(feature = "toml")]
 pub use crate::sources::Toml;
 
+/// YAML file configuration source (requires `yaml` feature).
+#[cfg(feature = "yaml")]
+pub use crate::sources::Yaml;
+
 /// Environment variable configuration source.
 pub use crate::sources::Env;
 

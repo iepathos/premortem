@@ -49,3 +49,8 @@ full = ["toml", "json", "yaml", "watch", "remote", "derive"]
 name = "watch"
 path = "examples/watch/main.rs"
 required-features = ["watch"]
+
+[[example]]
+name = "yaml"
+path = "examples/yaml/main.rs"
+required-features = ["yaml"]
