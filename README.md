@@ -4,7 +4,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/premortem.svg)](https://crates.io/crates/premortem)
 [![Documentation](https://docs.rs/premortem/badge.svg)](https://docs.rs/premortem)
-[![License](https://img.shields.io/crates/l/premortem.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT)](LICENSE)
 
 A configuration library that performs a **premortem** on your app's config—finding all the ways it would die before it ever runs.
 

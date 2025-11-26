@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/premortem-derive.svg)](https://crates.io/crates/premortem-derive)
 [![Documentation](https://docs.rs/premortem-derive/badge.svg)](https://docs.rs/premortem-derive)
-[![License](https://img.shields.io/crates/l/premortem-derive.svg)](../LICENSE)
+[![License](https://img.shields.io/badge/license-MIT)](../LICENSE)
 
 Derive macros for the [premortem](https://crates.io/crates/premortem) configuration validation library.
 
