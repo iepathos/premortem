@@ -95,26 +95,33 @@ fn demo_valid_config() {
 }
 
 fn demo_invalid_config() {
-    // Config with multiple validation errors
-    let invalid_toml = r#"
-        [server]
-        host = ""
-        port = 0
+    // Config with validation errors from multiple sources (TOML + env vars).
+    // TOML has some invalid values, and env vars override others with invalid values.
+    // Source locations show where each invalid value came from.
+    let config_toml = r#"[server]
+host = ""
+port = 8080
 
-        [database]
-        host = ""
-        port = 5432
-        pool_size = -5
-    "#;
+[database]
+host = "db.example.com"
+port = 5432
+pool_size = -5"#;
+
+    // Env vars override some values with invalid ones
+    let env = MockEnv::new()
+        .with_file("config.toml", config_toml)
+        .with_env("APP_SERVER_PORT", "0") // Invalid: overrides valid TOML value
+        .with_env("APP_DATABASE_HOST", ""); // Invalid: overrides valid TOML value
 
     let result = Config::<AppConfig>::builder()
-        .source(Toml::string(invalid_toml).named("config.toml"))
-        .build();
+        .source(Toml::file("config.toml"))
+        .source(Env::prefix("APP").separator("_"))
+        .build_with_env(&env);
 
     match result {
         Ok(_) => println!("Unexpected success"),
         Err(errors) => {
-            // Display trait shows all accumulated errors
+            // Display trait shows all accumulated errors with source locations
             print!("{}", errors);
         }
     }
@@ -147,20 +154,25 @@ pool_size = 10"#;
 
 fn demo_pretty_errors() {
     // Demonstrate pretty printing with validation errors grouped by source.
-    // The config has multiple validation failures that will be grouped by file.
+    // Errors from TOML and env vars are grouped separately.
     let config_toml = r#"[server]
 host = ""
-port = 0
+port = 8080
 
 [database]
-host = ""
+host = "db.example.com"
 port = 5432
 pool_size = -5"#;
 
-    let env = MockEnv::new().with_file("config.toml", config_toml);
+    // Env vars override some values with invalid ones
+    let env = MockEnv::new()
+        .with_file("config.toml", config_toml)
+        .with_env("APP_SERVER_PORT", "0")
+        .with_env("APP_DATABASE_HOST", "");
 
     let result = Config::<AppConfig>::builder()
         .source(Toml::file("config.toml"))
+        .source(Env::prefix("APP").separator("_"))
         .build_with_env(&env);
 
     match result {

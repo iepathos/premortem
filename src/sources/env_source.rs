@@ -252,8 +252,9 @@ impl Source for Env {
                 continue;
             }
 
-            // Get suffix after prefix
+            // Get suffix after prefix, stripping leading separator if present
             let suffix = &key[self.prefix.len()..];
+            let suffix = suffix.strip_prefix(&self.separator).unwrap_or(suffix);
 
             // Check for custom mapping
             let path = if let Some(mapped) = self.custom_mappings.get(suffix) {
@@ -337,18 +338,19 @@ fn parse_env_value(value: &str, list_separator: Option<&str>) -> Value {
 
 /// Pure function: parse scalar value with type inference.
 ///
-/// Attempts to parse in order: boolean, integer, float, then string.
+/// Attempts to parse in order: integer, boolean, float, then string.
+/// Note: "0" and "1" are parsed as integers, not booleans.
 fn parse_scalar(value: &str) -> Value {
-    // Try boolean
-    match value.to_lowercase().as_str() {
-        "true" | "yes" | "1" | "on" => return Value::Bool(true),
-        "false" | "no" | "0" | "off" => return Value::Bool(false),
-        _ => {}
-    }
-
-    // Try integer
+    // Try integer first (before boolean, since "0" and "1" are commonly integers)
     if let Ok(i) = value.parse::<i64>() {
         return Value::Integer(i);
+    }
+
+    // Try boolean (only for explicit boolean strings, not "0"/"1")
+    match value.to_lowercase().as_str() {
+        "true" | "yes" | "on" => return Value::Bool(true),
+        "false" | "no" | "off" => return Value::Bool(false),
+        _ => {}
     }
 
     // Try float
@@ -498,17 +500,18 @@ mod tests {
         let env = MockEnv::new()
             .with_env("APP_TRUE1", "true")
             .with_env("APP_TRUE2", "yes")
-            .with_env("APP_TRUE3", "1")
-            .with_env("APP_TRUE4", "on")
+            .with_env("APP_TRUE3", "on")
             .with_env("APP_FALSE1", "false")
             .with_env("APP_FALSE2", "no")
-            .with_env("APP_FALSE3", "0")
-            .with_env("APP_FALSE4", "off");
+            .with_env("APP_FALSE3", "off")
+            // "0" and "1" are parsed as integers, not booleans
+            .with_env("APP_INT_ZERO", "0")
+            .with_env("APP_INT_ONE", "1");
 
         let source = Env::prefix("APP_");
         let values = source.load(&env).expect("should load successfully");
 
-        // True values
+        // True values (explicit boolean strings)
         assert_eq!(
             values.get("true1").map(|v| v.value.as_bool()),
             Some(Some(true))
@@ -521,12 +524,8 @@ mod tests {
             values.get("true3").map(|v| v.value.as_bool()),
             Some(Some(true))
         );
-        assert_eq!(
-            values.get("true4").map(|v| v.value.as_bool()),
-            Some(Some(true))
-        );
 
-        // False values
+        // False values (explicit boolean strings)
         assert_eq!(
             values.get("false1").map(|v| v.value.as_bool()),
             Some(Some(false))
@@ -539,9 +538,16 @@ mod tests {
             values.get("false3").map(|v| v.value.as_bool()),
             Some(Some(false))
         );
+
+        // "0" and "1" are integers, not booleans
+        // Note: paths are converted to dot notation (int.zero, int.one)
         assert_eq!(
-            values.get("false4").map(|v| v.value.as_bool()),
-            Some(Some(false))
+            values.get("int.zero").map(|v| v.value.as_integer()),
+            Some(Some(0))
+        );
+        assert_eq!(
+            values.get("int.one").map(|v| v.value.as_integer()),
+            Some(Some(1))
         );
     }
 
@@ -703,7 +709,6 @@ mod tests {
         assert_eq!(parse_scalar("TRUE"), Value::Bool(true));
         assert_eq!(parse_scalar("yes"), Value::Bool(true));
         assert_eq!(parse_scalar("YES"), Value::Bool(true));
-        assert_eq!(parse_scalar("1"), Value::Bool(true));
         assert_eq!(parse_scalar("on"), Value::Bool(true));
         assert_eq!(parse_scalar("ON"), Value::Bool(true));
 
@@ -711,9 +716,12 @@ mod tests {
         assert_eq!(parse_scalar("FALSE"), Value::Bool(false));
         assert_eq!(parse_scalar("no"), Value::Bool(false));
         assert_eq!(parse_scalar("NO"), Value::Bool(false));
-        assert_eq!(parse_scalar("0"), Value::Bool(false));
         assert_eq!(parse_scalar("off"), Value::Bool(false));
         assert_eq!(parse_scalar("OFF"), Value::Bool(false));
+
+        // "0" and "1" are parsed as integers, not booleans
+        assert_eq!(parse_scalar("0"), Value::Integer(0));
+        assert_eq!(parse_scalar("1"), Value::Integer(1));
     }
 
     #[test]
@@ -760,8 +768,8 @@ mod tests {
         match value {
             Value::Array(items) => {
                 assert_eq!(items.len(), 3);
-                // Note: "1" is parsed as bool true, "2" and "3" are integers
-                assert_eq!(items[0], Value::Bool(true));
+                // All numeric strings are parsed as integers
+                assert_eq!(items[0], Value::Integer(1));
                 assert_eq!(items[1], Value::Integer(2));
                 assert_eq!(items[2], Value::Integer(3));
             }
