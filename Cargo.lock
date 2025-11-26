@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "premortem"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "notify",
@@ -657,7 +657,7 @@ dependencies = [
 
 [[package]]
 name = "premortem-derive"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
