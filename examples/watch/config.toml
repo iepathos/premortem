@@ -1,0 +1,17 @@
+# Server configuration - try editing this while the example is running!
+#
+# The example will automatically detect changes and reload.
+# Invalid changes are rejected and the previous config is preserved.
+
+[server]
+host = "localhost"
+port = 0
+
+[database]
+host = "localhost"
+port = 5432
+max_connections = 10
+
+[features]
+debug_mode = true
+rate_limit = 100

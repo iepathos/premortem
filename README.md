@@ -126,6 +126,7 @@ See the [`examples/`](./examples/) directory for runnable examples:
 | [validation](./examples/validation/) | Comprehensive validation patterns |
 | [testing](./examples/testing/) | Configuration testing with MockEnv |
 | [tracing](./examples/tracing/) | Value origin tracing demonstration |
+| [watch](./examples/watch/) | Hot reload with automatic file watching |
 | [web-server](./examples/web-server/) | Axum web server configuration |
 
 Run an example:

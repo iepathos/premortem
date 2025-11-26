@@ -90,6 +90,24 @@ cd examples/tracing
 cargo run
 ```
 
+### [watch](./watch/)
+
+**Hot reload with file watching**
+
+Demonstrates automatic configuration reloading when files change. Shows:
+- Building watched configuration with `build_watched()`
+- Subscribing to change events (`Reloaded`, `ReloadFailed`, `SourceChanged`)
+- Thread-safe config access via `WatchedConfig<T>`
+- Graceful handling of invalid config changes (old config preserved)
+
+```bash
+# From workspace root (requires watch feature)
+cargo run --example watch --features watch
+
+# Then edit examples/watch/config.toml while running!
+# Try setting port = 0 to see validation rejection
+```
+
 ### [web-server](./web-server/)
 
 **Axum web server integration**

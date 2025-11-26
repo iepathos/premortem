@@ -42,3 +42,8 @@ yaml = []
 watch = ["dep:notify"]
 remote = []
 full = ["toml", "json", "yaml", "watch", "remote", "derive"]
+
+[[example]]
+name = "watch"
+path = "examples/watch/main.rs"
+required-features = ["watch"]
