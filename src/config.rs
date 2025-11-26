@@ -842,4 +842,152 @@ mod tests {
         let port_trace = traced.trace("port").unwrap();
         assert_eq!(port_trace.history.len(), 2);
     }
+
+    // ========== Array reconstruction tests ==========
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+    struct ConfigWithVec {
+        name: String,
+        hosts: Vec<String>,
+        ports: Vec<u16>,
+    }
+
+    impl Validate for ConfigWithVec {
+        fn validate(&self) -> ConfigValidation<()> {
+            Validation::Success(())
+        }
+    }
+
+    #[test]
+    fn test_defaults_with_vec_roundtrip() {
+        use crate::sources::Defaults;
+
+        let original = ConfigWithVec {
+            name: "test-app".to_string(),
+            hosts: vec![
+                "host1".to_string(),
+                "host2".to_string(),
+                "host3".to_string(),
+            ],
+            ports: vec![8080, 8081],
+        };
+
+        let env = MockEnv::new();
+        let result = Config::<ConfigWithVec>::builder()
+            .source(Defaults::from(original.clone()))
+            .build_with_env(&env);
+
+        assert!(result.is_ok(), "Build failed: {:?}", result.err());
+        let config = result.unwrap();
+
+        assert_eq!(config.name, "test-app");
+        assert_eq!(config.hosts, vec!["host1", "host2", "host3"]);
+        assert_eq!(config.ports, vec![8080, 8081]);
+    }
+
+    #[test]
+    fn test_defaults_with_empty_vec_roundtrip() {
+        use crate::sources::Defaults;
+
+        let original = ConfigWithVec {
+            name: "empty-app".to_string(),
+            hosts: vec![],
+            ports: vec![],
+        };
+
+        let env = MockEnv::new();
+        let result = Config::<ConfigWithVec>::builder()
+            .source(Defaults::from(original.clone()))
+            .build_with_env(&env);
+
+        assert!(result.is_ok(), "Build failed: {:?}", result.err());
+        let config = result.unwrap();
+
+        assert_eq!(config.name, "empty-app");
+        assert!(config.hosts.is_empty());
+        assert!(config.ports.is_empty());
+    }
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+    struct ServerEntry {
+        host: String,
+        port: u16,
+    }
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+    struct ConfigWithNestedVec {
+        name: String,
+        servers: Vec<ServerEntry>,
+    }
+
+    impl Validate for ConfigWithNestedVec {
+        fn validate(&self) -> ConfigValidation<()> {
+            Validation::Success(())
+        }
+    }
+
+    #[test]
+    fn test_defaults_with_vec_of_structs_roundtrip() {
+        use crate::sources::Defaults;
+
+        let original = ConfigWithNestedVec {
+            name: "multi-server".to_string(),
+            servers: vec![
+                ServerEntry {
+                    host: "server1.example.com".to_string(),
+                    port: 8080,
+                },
+                ServerEntry {
+                    host: "server2.example.com".to_string(),
+                    port: 8081,
+                },
+            ],
+        };
+
+        let env = MockEnv::new();
+        let result = Config::<ConfigWithNestedVec>::builder()
+            .source(Defaults::from(original.clone()))
+            .build_with_env(&env);
+
+        assert!(result.is_ok(), "Build failed: {:?}", result.err());
+        let config = result.unwrap();
+
+        assert_eq!(config.name, "multi-server");
+        assert_eq!(config.servers.len(), 2);
+        assert_eq!(config.servers[0].host, "server1.example.com");
+        assert_eq!(config.servers[0].port, 8080);
+        assert_eq!(config.servers[1].host, "server2.example.com");
+        assert_eq!(config.servers[1].port, 8081);
+    }
+
+    #[test]
+    fn test_defaults_with_vec_merged_with_toml() {
+        use crate::sources::{Defaults, Toml};
+
+        let defaults = ConfigWithVec {
+            name: "default-app".to_string(),
+            hosts: vec!["default-host".to_string()],
+            ports: vec![80],
+        };
+
+        let toml_content = r#"
+            name = "overridden-app"
+            hosts = ["host1", "host2"]
+            ports = [8080, 8081, 8082]
+        "#;
+
+        let env = MockEnv::new().with_file("config.toml", toml_content);
+        let result = Config::<ConfigWithVec>::builder()
+            .source(Defaults::from(defaults))
+            .source(Toml::file("config.toml"))
+            .build_with_env(&env);
+
+        assert!(result.is_ok(), "Build failed: {:?}", result.err());
+        let config = result.unwrap();
+
+        // TOML should override defaults
+        assert_eq!(config.name, "overridden-app");
+        assert_eq!(config.hosts, vec!["host1", "host2"]);
+        assert_eq!(config.ports, vec![8080, 8081, 8082]);
+    }
 }

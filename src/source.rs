@@ -69,40 +69,154 @@ impl ConfigValues {
     ///
     /// Transforms flat paths like "database.host" into nested JSON:
     /// `{"database": {"host": "..."}}`
+    ///
+    /// Also handles array notation like "hosts[0]" -> `{"hosts": ["..."]}`
     pub fn to_json(&self) -> serde_json::Value {
-        let mut root = serde_json::Map::new();
+        let mut root = serde_json::Value::Object(serde_json::Map::new());
 
+        // First pass: handle empty arrays using __len metadata
+        // Empty arrays have no [n] elements, so we need __len to know they exist
         for (path, config_value) in self.iter() {
-            let parts: Vec<&str> = path.split('.').collect();
-            insert_at_path(&mut root, &parts, value_to_json(&config_value.value));
+            if path.ends_with(".__len") {
+                if let Some(0) = config_value.value.as_integer() {
+                    // This is an empty array - create it
+                    let array_path = &path[..path.len() - 6]; // Remove ".__len"
+                    let segments = parse_path(array_path);
+                    insert_value(&mut root, &segments, serde_json::Value::Array(Vec::new()));
+                }
+            }
         }
 
-        serde_json::Value::Object(root)
+        // Second pass: insert all actual values
+        for (path, config_value) in self.iter() {
+            // Skip internal metadata keys (e.g., "hosts.__len")
+            if path.contains(".__") {
+                continue;
+            }
+
+            let segments = parse_path(path);
+            insert_value(&mut root, &segments, value_to_json(&config_value.value));
+        }
+
+        root
     }
 }
 
-/// Insert a JSON value at a nested path.
-fn insert_at_path(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    path: &[&str],
-    value: serde_json::Value,
-) {
-    if path.is_empty() {
+/// A segment in a configuration path.
+#[derive(Debug, Clone, PartialEq)]
+enum PathSegment {
+    /// Object key like "database" in "database.host"
+    Key(String),
+    /// Array index like 0 in "hosts[0]"
+    Index(usize),
+}
+
+/// Parse a path string into segments.
+///
+/// Handles paths like:
+/// - "database.host" -> [Key("database"), Key("host")]
+/// - "hosts[0]" -> [Key("hosts"), Index(0)]
+/// - "servers[0].host" -> [Key("servers"), Index(0), Key("host")]
+/// - "matrix[0][1]" -> [Key("matrix"), Index(0), Index(1)]
+fn parse_path(path: &str) -> Vec<PathSegment> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+
+    let mut chars = path.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '.' => {
+                if !current.is_empty() {
+                    segments.push(PathSegment::Key(current.clone()));
+                    current.clear();
+                }
+            }
+            '[' => {
+                if !current.is_empty() {
+                    segments.push(PathSegment::Key(current.clone()));
+                    current.clear();
+                }
+                // Parse the index
+                let mut index_str = String::new();
+                while let Some(&next_ch) = chars.peek() {
+                    if next_ch == ']' {
+                        chars.next(); // consume ']'
+                        break;
+                    }
+                    index_str.push(chars.next().unwrap());
+                }
+                if let Ok(index) = index_str.parse::<usize>() {
+                    segments.push(PathSegment::Index(index));
+                }
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        segments.push(PathSegment::Key(current));
+    }
+
+    segments
+}
+
+/// Insert a value into a JSON structure following the path segments.
+fn insert_value(root: &mut serde_json::Value, segments: &[PathSegment], value: serde_json::Value) {
+    if segments.is_empty() {
+        *root = value;
         return;
     }
 
-    if path.len() == 1 {
-        obj.insert(path[0].to_string(), value);
-        return;
-    }
+    match &segments[0] {
+        PathSegment::Key(key) => {
+            // Ensure root is an object
+            if !root.is_object() {
+                *root = serde_json::Value::Object(serde_json::Map::new());
+            }
 
-    let key = path[0].to_string();
-    let child = obj
-        .entry(key)
-        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            let obj = root.as_object_mut().unwrap();
 
-    if let serde_json::Value::Object(ref mut map) = child {
-        insert_at_path(map, &path[1..], value);
+            if segments.len() == 1 {
+                obj.insert(key.clone(), value);
+            } else {
+                // Peek at next segment to determine child type
+                let child = obj
+                    .entry(key.clone())
+                    .or_insert_with(|| match &segments[1] {
+                        PathSegment::Index(_) => serde_json::Value::Array(Vec::new()),
+                        PathSegment::Key(_) => serde_json::Value::Object(serde_json::Map::new()),
+                    });
+                insert_value(child, &segments[1..], value);
+            }
+        }
+        PathSegment::Index(index) => {
+            // Ensure root is an array
+            if !root.is_array() {
+                *root = serde_json::Value::Array(Vec::new());
+            }
+
+            let arr = root.as_array_mut().unwrap();
+
+            // Extend array if needed
+            while arr.len() <= *index {
+                arr.push(serde_json::Value::Null);
+            }
+
+            if segments.len() == 1 {
+                arr[*index] = value;
+            } else {
+                // Peek at next segment to determine child type
+                if arr[*index].is_null() {
+                    arr[*index] = match &segments[1] {
+                        PathSegment::Index(_) => serde_json::Value::Array(Vec::new()),
+                        PathSegment::Key(_) => serde_json::Value::Object(serde_json::Map::new()),
+                    };
+                }
+                insert_value(&mut arr[*index], &segments[1..], value);
+            }
+        }
     }
 }
 
@@ -286,5 +400,224 @@ mod tests {
         assert_eq!(json["database"]["host"], "localhost");
         assert_eq!(json["database"]["port"], 5432);
         assert_eq!(json["debug"], true);
+    }
+
+    #[test]
+    fn test_parse_path_simple() {
+        let segments = parse_path("host");
+        assert_eq!(segments, vec![PathSegment::Key("host".to_string())]);
+    }
+
+    #[test]
+    fn test_parse_path_nested() {
+        let segments = parse_path("database.host");
+        assert_eq!(
+            segments,
+            vec![
+                PathSegment::Key("database".to_string()),
+                PathSegment::Key("host".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_path_array_index() {
+        let segments = parse_path("hosts[0]");
+        assert_eq!(
+            segments,
+            vec![PathSegment::Key("hosts".to_string()), PathSegment::Index(0)]
+        );
+    }
+
+    #[test]
+    fn test_parse_path_array_with_nested() {
+        let segments = parse_path("servers[0].host");
+        assert_eq!(
+            segments,
+            vec![
+                PathSegment::Key("servers".to_string()),
+                PathSegment::Index(0),
+                PathSegment::Key("host".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_path_nested_arrays() {
+        let segments = parse_path("matrix[0][1]");
+        assert_eq!(
+            segments,
+            vec![
+                PathSegment::Key("matrix".to_string()),
+                PathSegment::Index(0),
+                PathSegment::Index(1)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_to_json_with_simple_array() {
+        let mut values = ConfigValues::empty();
+        values.insert(
+            "hosts[0]".to_string(),
+            ConfigValue::new(
+                Value::String("host1".to_string()),
+                SourceLocation::new("test"),
+            ),
+        );
+        values.insert(
+            "hosts[1]".to_string(),
+            ConfigValue::new(
+                Value::String("host2".to_string()),
+                SourceLocation::new("test"),
+            ),
+        );
+
+        let json = values.to_json();
+
+        assert!(json["hosts"].is_array());
+        let arr = json["hosts"].as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0], "host1");
+        assert_eq!(arr[1], "host2");
+    }
+
+    #[test]
+    fn test_to_json_with_array_of_objects() {
+        let mut values = ConfigValues::empty();
+        values.insert(
+            "servers[0].host".to_string(),
+            ConfigValue::new(
+                Value::String("server1".to_string()),
+                SourceLocation::new("test"),
+            ),
+        );
+        values.insert(
+            "servers[0].port".to_string(),
+            ConfigValue::new(Value::Integer(8080), SourceLocation::new("test")),
+        );
+        values.insert(
+            "servers[1].host".to_string(),
+            ConfigValue::new(
+                Value::String("server2".to_string()),
+                SourceLocation::new("test"),
+            ),
+        );
+        values.insert(
+            "servers[1].port".to_string(),
+            ConfigValue::new(Value::Integer(8081), SourceLocation::new("test")),
+        );
+
+        let json = values.to_json();
+
+        assert!(json["servers"].is_array());
+        let arr = json["servers"].as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["host"], "server1");
+        assert_eq!(arr[0]["port"], 8080);
+        assert_eq!(arr[1]["host"], "server2");
+        assert_eq!(arr[1]["port"], 8081);
+    }
+
+    #[test]
+    fn test_to_json_skips_len_metadata() {
+        let mut values = ConfigValues::empty();
+        values.insert(
+            "hosts[0]".to_string(),
+            ConfigValue::new(
+                Value::String("host1".to_string()),
+                SourceLocation::new("test"),
+            ),
+        );
+        values.insert(
+            "hosts.__len".to_string(),
+            ConfigValue::new(Value::Integer(1), SourceLocation::new("test")),
+        );
+
+        let json = values.to_json();
+
+        assert!(json["hosts"].is_array());
+        // __len should not appear in output
+        assert!(json["hosts"]["__len"].is_null());
+    }
+
+    #[test]
+    fn test_to_json_mixed_object_and_array() {
+        let mut values = ConfigValues::empty();
+        values.insert(
+            "config.name".to_string(),
+            ConfigValue::new(
+                Value::String("myapp".to_string()),
+                SourceLocation::new("test"),
+            ),
+        );
+        values.insert(
+            "config.hosts[0]".to_string(),
+            ConfigValue::new(
+                Value::String("localhost".to_string()),
+                SourceLocation::new("test"),
+            ),
+        );
+        values.insert(
+            "config.hosts[1]".to_string(),
+            ConfigValue::new(
+                Value::String("remote".to_string()),
+                SourceLocation::new("test"),
+            ),
+        );
+
+        let json = values.to_json();
+
+        assert_eq!(json["config"]["name"], "myapp");
+        assert!(json["config"]["hosts"].is_array());
+        let arr = json["config"]["hosts"].as_array().unwrap();
+        assert_eq!(arr[0], "localhost");
+        assert_eq!(arr[1], "remote");
+    }
+
+    #[test]
+    fn test_to_json_empty_array_from_len_metadata() {
+        let mut values = ConfigValues::empty();
+        values.insert(
+            "name".to_string(),
+            ConfigValue::new(
+                Value::String("test".to_string()),
+                SourceLocation::new("test"),
+            ),
+        );
+        // Empty array represented only by __len = 0
+        values.insert(
+            "hosts.__len".to_string(),
+            ConfigValue::new(Value::Integer(0), SourceLocation::new("test")),
+        );
+
+        let json = values.to_json();
+
+        assert_eq!(json["name"], "test");
+        assert!(json["hosts"].is_array());
+        let arr = json["hosts"].as_array().unwrap();
+        assert!(arr.is_empty());
+    }
+
+    #[test]
+    fn test_to_json_nested_empty_array() {
+        let mut values = ConfigValues::empty();
+        values.insert(
+            "config.name".to_string(),
+            ConfigValue::new(
+                Value::String("test".to_string()),
+                SourceLocation::new("test"),
+            ),
+        );
+        values.insert(
+            "config.items.__len".to_string(),
+            ConfigValue::new(Value::Integer(0), SourceLocation::new("test")),
+        );
+
+        let json = values.to_json();
+
+        assert_eq!(json["config"]["name"], "test");
+        assert!(json["config"]["items"].is_array());
+        assert!(json["config"]["items"].as_array().unwrap().is_empty());
     }
 }
