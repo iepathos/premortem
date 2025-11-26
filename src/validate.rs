@@ -76,6 +76,7 @@ impl ValidationContext {
 // while still enabling source location lookup from generated validation code.
 thread_local! {
     static VALIDATION_CONTEXT: RefCell<Option<ValidationContext>> = const { RefCell::new(None) };
+    static PATH_PREFIX: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Run a function with a validation context set.
@@ -100,12 +101,41 @@ where
 ///
 /// Returns `None` if no context is set or if the path is not found.
 /// This is used by generated validation code to attach source locations to errors.
+///
+/// The lookup path is computed by prepending any active path prefixes (from nested
+/// validation) to the given field path.
 pub fn current_source_location(path: &str) -> Option<SourceLocation> {
+    // Build full path by prepending the current prefix
+    let full_path = PATH_PREFIX.with(|cell| {
+        let prefixes = cell.borrow();
+        if prefixes.is_empty() {
+            path.to_string()
+        } else {
+            format!("{}.{}", prefixes.join("."), path)
+        }
+    });
+
     VALIDATION_CONTEXT.with(|cell| {
         cell.borrow()
             .as_ref()
-            .and_then(|ctx| ctx.location_for(path).cloned())
+            .and_then(|ctx| ctx.location_for(&full_path).cloned())
     })
+}
+
+/// Push a path prefix for nested validation.
+///
+/// Used by `validate_at` to track the current path context during nested struct validation.
+pub fn push_path_prefix(prefix: &str) {
+    PATH_PREFIX.with(|cell| {
+        cell.borrow_mut().push(prefix.to_string());
+    });
+}
+
+/// Pop a path prefix after nested validation completes.
+pub fn pop_path_prefix() {
+    PATH_PREFIX.with(|cell| {
+        cell.borrow_mut().pop();
+    });
 }
 
 /// Trait for validating configuration values.
@@ -131,6 +161,10 @@ pub trait Validate {
     /// This adds context to all errors, following stillwater's error trail pattern.
     /// Used for nested struct validation.
     ///
+    /// The path prefix is also pushed to thread-local storage so that source location
+    /// lookups during nested validation use the correct full path (e.g., "server.host"
+    /// instead of just "host").
+    ///
     /// # Example
     ///
     /// ```ignore
@@ -139,8 +173,12 @@ pub trait Validate {
     /// database_config.validate_at("database")
     /// ```
     fn validate_at(&self, path: &str) -> ConfigValidation<()> {
-        self.validate()
-            .map_err(|errors| errors.with_path_prefix(path))
+        // Push prefix for source location lookups during nested validation
+        push_path_prefix(path);
+        let result = self.validate();
+        pop_path_prefix();
+
+        result.map_err(|errors| errors.with_path_prefix(path))
     }
 }
 
@@ -1773,5 +1811,85 @@ mod tests {
 
         // Context should be cleared
         assert!(current_source_location("field").is_none());
+    }
+
+    #[test]
+    fn test_path_prefix_for_nested_lookup() {
+        let mut locations = SourceLocationMap::new();
+        locations.insert(
+            "server.host".to_string(),
+            SourceLocation::new("config.toml").with_line(3),
+        );
+        locations.insert(
+            "server.port".to_string(),
+            SourceLocation::new("config.toml").with_line(4),
+        );
+        locations.insert(
+            "database.host".to_string(),
+            SourceLocation::new("config.toml").with_line(7),
+        );
+
+        let ctx = ValidationContext::new(locations);
+
+        with_validation_context(ctx, || {
+            // Without prefix, "host" doesn't find anything
+            assert!(current_source_location("host").is_none());
+
+            // With "server" prefix, "host" finds "server.host"
+            push_path_prefix("server");
+            let loc = current_source_location("host");
+            assert!(loc.is_some());
+            let loc = loc.unwrap();
+            assert_eq!(loc.source, "config.toml");
+            assert_eq!(loc.line, Some(3));
+
+            // port also works with prefix
+            let port_loc = current_source_location("port").unwrap();
+            assert_eq!(port_loc.line, Some(4));
+
+            pop_path_prefix();
+
+            // After popping, "host" doesn't find anything again
+            assert!(current_source_location("host").is_none());
+
+            // With "database" prefix
+            push_path_prefix("database");
+            let db_loc = current_source_location("host").unwrap();
+            assert_eq!(db_loc.line, Some(7));
+            pop_path_prefix();
+        });
+    }
+
+    #[test]
+    fn test_nested_path_prefix_stacking() {
+        let mut locations = SourceLocationMap::new();
+        locations.insert(
+            "outer.inner.field".to_string(),
+            SourceLocation::new("config.toml").with_line(10),
+        );
+
+        let ctx = ValidationContext::new(locations);
+
+        with_validation_context(ctx, || {
+            // No prefix - not found
+            assert!(current_source_location("field").is_none());
+
+            // Single prefix - still not found
+            push_path_prefix("outer");
+            assert!(current_source_location("field").is_none());
+
+            // Nested prefix - found
+            push_path_prefix("inner");
+            let loc = current_source_location("field");
+            assert!(loc.is_some());
+            assert_eq!(loc.unwrap().line, Some(10));
+
+            // Pop inner prefix
+            pop_path_prefix();
+            assert!(current_source_location("field").is_none());
+
+            // Pop outer prefix
+            pop_path_prefix();
+        });
     }
 }

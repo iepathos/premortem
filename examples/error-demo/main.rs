@@ -121,70 +121,53 @@ fn demo_invalid_config() {
 }
 
 fn demo_readme_errors() {
-    // Manually construct errors matching README example:
-    //
-    // Configuration errors (3):
-    //   [config.toml:8] missing required field 'database.host'
-    //   [env:APP_PORT] value "abc" is not a valid integer
-    //   [config.toml:10] 'pool_size' value -5 must be >= 1
+    // Demonstrate missing field error - config is incomplete
+    let config_toml = r#"[server]
+host = "localhost"
+port = 8080
 
-    let errors = ConfigErrors::from_vec(vec![
-        ConfigError::MissingField {
-            path: "database.host".to_string(),
-            source_location: Some(SourceLocation::new("config.toml").with_line(8)),
-            searched_sources: vec!["config.toml".to_string(), "environment".to_string()],
-        },
-        ConfigError::ParseError {
-            path: "port".to_string(),
-            source_location: SourceLocation::env("APP_PORT"),
-            expected_type: "integer".to_string(),
-            actual_value: "abc".to_string(),
-            message: "is not a valid integer".to_string(),
-        },
-        ConfigError::ValidationError {
-            path: "pool_size".to_string(),
-            source_location: Some(SourceLocation::new("config.toml").with_line(10)),
-            value: Some("-5".to_string()),
-            message: "must be >= 1".to_string(),
-        },
-    ])
-    .unwrap();
+[database]
+port = 5432
+pool_size = 10"#;
+    // Note: database.host is missing!
 
-    // Display trait output (matches README format)
-    print!("{}", errors);
+    let env = MockEnv::new().with_file("config.toml", config_toml);
+
+    let result = Config::<AppConfig>::builder()
+        .source(Toml::file("config.toml"))
+        .build_with_env(&env);
+
+    match result {
+        Ok(_) => println!("Unexpected success"),
+        Err(errors) => {
+            print!("{}", errors);
+        }
+    }
 }
 
 fn demo_pretty_errors() {
-    // Errors from multiple sources - matching what real validation produces
-    let errors = ConfigErrors::from_vec(vec![
-        ConfigError::ValidationError {
-            path: "server.host".to_string(),
-            source_location: Some(SourceLocation::new("config.toml").with_line(3)),
-            value: Some("".to_string()),
-            message: "value cannot be empty".to_string(),
-        },
-        ConfigError::ValidationError {
-            path: "database.host".to_string(),
-            source_location: Some(SourceLocation::new("config.toml").with_line(8)),
-            value: Some("".to_string()),
-            message: "value cannot be empty".to_string(),
-        },
-        ConfigError::ValidationError {
-            path: "database.pool_size".to_string(),
-            source_location: Some(SourceLocation::new("config.toml").with_line(10)),
-            value: Some("-5".to_string()),
-            message: "must be >= 1".to_string(),
-        },
-        ConfigError::ParseError {
-            path: "server.port".to_string(),
-            source_location: SourceLocation::env("APP_SERVER_PORT"),
-            expected_type: "integer".to_string(),
-            actual_value: "not-a-number".to_string(),
-            message: "invalid digit".to_string(),
-        },
-    ])
-    .unwrap();
+    // Demonstrate pretty printing with validation errors grouped by source.
+    // The config has multiple validation failures that will be grouped by file.
+    let config_toml = r#"[server]
+host = ""
+port = 0
 
-    // Pretty print with colors and grouping by source
-    errors.pretty_print(&PrettyPrintOptions::default());
+[database]
+host = ""
+port = 5432
+pool_size = -5"#;
+
+    let env = MockEnv::new().with_file("config.toml", config_toml);
+
+    let result = Config::<AppConfig>::builder()
+        .source(Toml::file("config.toml"))
+        .build_with_env(&env);
+
+    match result {
+        Ok(_) => println!("Unexpected success"),
+        Err(errors) => {
+            // Pretty print with colors and grouping by source
+            errors.pretty_print(&PrettyPrintOptions::default());
+        }
+    }
 }
