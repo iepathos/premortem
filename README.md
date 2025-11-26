@@ -42,6 +42,8 @@ Configuration errors (3):
 
 One run. All errors. Know how your app would die—before it does.
 
+Try it yourself: `cargo run --example error-demo`
+
 ## Features
 
 - **Accumulate all errors** — Never stop at the first problem
@@ -117,17 +119,18 @@ See the [`examples/`](./examples/) directory for runnable examples:
 
 | Example | Description |
 |---------|-------------|
+| [error-demo](./examples/error-demo/) | Error output with source location tracking |
+| [layered-config](./examples/layered-config/) | Multi-source config with value tracing |
 | [basic](./examples/basic/) | Minimal configuration loading |
 | [validation](./examples/validation/) | Comprehensive validation patterns |
 | [testing](./examples/testing/) | Configuration testing with MockEnv |
-| [layered](./examples/layered/) | Multi-source environment-specific config |
-| [tracing](./examples/tracing/) | Value origin debugging |
+| [web-server](./examples/web-server/) | Axum web server configuration |
 
 Run an example:
 
 ```bash
-cd examples/basic
-cargo run
+cargo run --example error-demo
+cargo run --example layered-config
 ```
 
 ## Documentation
