@@ -11,7 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- YAML configuration source support (`yaml` feature flag)
 - Source location tracking for all error types including `MissingField`
 - Source location propagation to validation errors for better debugging
 - JSON line tracking for source location consistency

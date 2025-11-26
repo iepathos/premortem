@@ -10,7 +10,7 @@
 //! # Core Concepts
 //!
 //! - **Error Accumulation**: Find ALL configuration errors, not just the first one
-//! - **Source Layering**: Merge config from files, environment, and remote sources
+//! - **Source Layering**: Merge config from files and environment variables
 //! - **Testable I/O**: Dependency injection via `ConfigEnv` trait
 //! - **Type Safety**: Deserialize into your types with full validation
 //!
@@ -85,7 +85,7 @@
 //! Premortem follows the "pure core, imperative shell" pattern:
 //!
 //! - **Pure Core**: Value merging, deserialization, and validation are pure functions
-//! - **Imperative Shell**: I/O operations use stillwater's `Effect` type with `ConfigEnv`
+//! - **Imperative Shell**: I/O operations use the `ConfigEnv` trait for dependency injection
 //!
 //! This architecture enables:
 //! - Easy unit testing with `MockEnv`

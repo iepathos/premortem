@@ -92,14 +92,14 @@ fn main() {
 
 ```toml
 [dependencies]
-premortem = "0.1"
+premortem = "0.2"
 ```
 
 With optional features:
 
 ```toml
 [dependencies]
-premortem = { version = "0.1", features = ["json", "yaml", "watch"] }
+premortem = { version = "0.2", features = ["json", "watch"] }
 ```
 
 ## Feature Flags
