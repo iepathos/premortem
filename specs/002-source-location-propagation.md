@@ -10,6 +10,8 @@ created: 2025-11-25
 
 # Specification 002: Source Location Propagation to Validation Errors
 
+> **Scope**: All file-based config sources (TOML, JSON, future YAML) must have consistent line tracking
+
 **Category**: foundation
 **Priority**: critical
 **Status**: draft
@@ -29,16 +31,27 @@ Configuration errors (3):
 
 However, the current implementation has two critical gaps:
 
-### Gap 1: TOML Parser Doesn't Capture Line Numbers
+### Gap 1: File Parsers Don't Capture Line Numbers
 
-In `src/sources/toml_source.rs`, the parser creates `ConfigValue` without line numbers:
+Both TOML and JSON sources create `ConfigValue` without line numbers:
 
+**TOML** (`src/sources/toml_source.rs`):
 ```rust
 // Current (broken):
 ConfigValue::new(toml_to_value(value), SourceLocation::new(source_name));
 //                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 //                                      Only stores "config.toml", no line number!
 ```
+
+**JSON** (`src/sources/json_source.rs`):
+```rust
+// Current (broken):
+ConfigValue::new(json_to_value(value), SourceLocation::new(source_name));
+//                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+//                                      Only stores "config.json", no line number!
+```
+
+All file-based sources have this same issue and need consistent line tracking.
 
 ### Gap 2: Validation Loses Source Locations Entirely
 
@@ -76,10 +89,21 @@ Ensure all configuration errors include accurate source locations (file:line) by
 
 ### Functional Requirements
 
-1. **TOML Line Number Tracking**
+1. **File-Based Source Line Number Tracking**
+
+   **TOML**:
    - Use `toml_edit` crate to parse TOML with span information
    - Extract line numbers for each key-value pair during parsing
    - Store line numbers in `SourceLocation` via `with_line()`
+
+   **JSON**:
+   - Use `serde_json` with position tracking via custom line counter
+   - Calculate line numbers from byte offsets in original content
+   - Store line numbers in `SourceLocation` via `with_line()`
+
+   **Future YAML** (when implemented):
+   - Use `yaml-rust2` or similar with span support
+   - Follow same pattern as TOML/JSON
 
 2. **Source Location Registry**
    - Create a `SourceLocationMap` type: `HashMap<String, SourceLocation>`
@@ -111,29 +135,33 @@ Ensure all configuration errors include accurate source locations (file:line) by
 
 - [ ] `toml_edit` added as dependency for TOML parsing
 - [ ] TOML parser captures line numbers for each value
+- [ ] JSON parser captures line numbers for each value
 - [ ] `SourceLocation` stored with line numbers in `ConfigValues`
 - [ ] `ValidationContext` created with source location lookup
 - [ ] Thread-local or context mechanism for derive macro access
 - [ ] Derive macro generates code that attaches source locations
 - [ ] `cargo run --example error-demo` shows `[config.toml:X]` prefixes
+- [ ] JSON errors show `[config.json:X]` prefixes
 - [ ] Error output matches README format exactly
 - [ ] All existing tests pass
-- [ ] New tests cover source location propagation
+- [ ] New tests cover source location propagation for TOML and JSON
 - [ ] No hardcoded line numbers in examples
 
 ## Technical Details
 
 ### Implementation Approach
 
-#### Phase 1: Add toml_edit and Capture Line Numbers
+#### Phase 1: Add Line Number Tracking to File-Based Sources
 
-1. Add `toml_edit` to Cargo.toml:
+##### 1a. TOML with toml_edit
+
+Add `toml_edit` to Cargo.toml:
 ```toml
 [dependencies]
 toml_edit = "0.22"
 ```
 
-2. Update `parse_toml()` in `src/sources/toml_source.rs`:
+Update `parse_toml()` in `src/sources/toml_source.rs`:
 ```rust
 use toml_edit::{DocumentMut, Item};
 
@@ -171,9 +199,94 @@ fn flatten_document(
         // ... arrays, etc.
     }
 }
+```
 
-fn line_from_offset(content: &str, offset: usize) -> u32 {
-    content[..offset.min(content.len())].lines().count() as u32
+##### 1b. JSON with Position Tracking
+
+Update `parse_json()` in `src/sources/json_source.rs`:
+
+```rust
+/// Parse JSON and track line numbers by scanning for key positions in original content
+fn parse_json(content: &str, source_name: &str) -> Result<ConfigValues, ConfigErrors> {
+    let json: serde_json::Value = serde_json::from_str(content).map_err(|e| {
+        // serde_json errors include line/column
+        let line = e.line();
+        let column = e.column();
+        // ... create error with location
+    })?;
+
+    let mut values = ConfigValues::empty();
+    let line_index = build_line_index(content);  // Precompute line starts
+    flatten_json(&json, "", source_name, content, &line_index, &mut values);
+    Ok(values)
+}
+
+/// Build index of byte offset -> line number for O(log n) lookup
+fn build_line_index(content: &str) -> Vec<usize> {
+    let mut index = vec![0];  // Line 1 starts at offset 0
+    for (i, c) in content.char_indices() {
+        if c == '\n' {
+            index.push(i + 1);
+        }
+    }
+    index
+}
+
+/// Find line number from byte offset using binary search
+fn line_from_offset(line_index: &[usize], offset: usize) -> u32 {
+    match line_index.binary_search(&offset) {
+        Ok(line) => (line + 1) as u32,
+        Err(line) => line as u32,
+    }
+}
+
+fn flatten_json(
+    value: &serde_json::Value,
+    prefix: &str,
+    source_name: &str,
+    content: &str,
+    line_index: &[usize],
+    values: &mut ConfigValues,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, val) in map {
+                let path = if prefix.is_empty() { key.clone() } else { format!("{}.{}", prefix, key) };
+                // Find key position in content for line number
+                let line = find_key_line(content, line_index, &path);
+                flatten_json(val, &path, source_name, content, line_index, values);
+            }
+        }
+        _ => {
+            // For leaf values, find approximate line by searching for the key
+            let line = find_key_line(content, line_index, prefix);
+            let mut loc = SourceLocation::new(source_name);
+            if let Some(l) = line {
+                loc = loc.with_line(l);
+            }
+            values.insert(prefix.to_string(), ConfigValue::new(json_to_value(value), loc));
+        }
+    }
+}
+
+/// Find the line where a key appears in the JSON content
+fn find_key_line(content: &str, line_index: &[usize], key: &str) -> Option<u32> {
+    // Search for "key": pattern
+    let pattern = format!("\"{}\"", key.split('.').last().unwrap_or(key));
+    content.find(&pattern).map(|offset| line_from_offset(line_index, offset))
+}
+```
+
+##### 1c. Shared Helper (Pure Function)
+
+Create shared utility in `src/sources/mod.rs`:
+```rust
+/// Calculate line number from byte offset (1-indexed)
+pub fn line_from_offset(content: &str, offset: usize) -> u32 {
+    content[..offset.min(content.len())]
+        .chars()
+        .filter(|&c| c == '\n')
+        .count() as u32 + 1
 }
 ```
 
@@ -334,32 +447,39 @@ fn line_from_offset(content: &str, offset: usize) -> u32;
 - **Prerequisites**: None (Spec 001 added source_location to MissingField, but this is independent)
 - **Affected Components**:
   - `Cargo.toml` - add `toml_edit` dependency
-  - `src/sources/toml_source.rs` - line number extraction
+  - `src/sources/toml_source.rs` - TOML line number extraction with toml_edit
+  - `src/sources/json_source.rs` - JSON line number extraction with position tracking
+  - `src/sources/mod.rs` - shared line calculation helper
   - `src/validate.rs` - ValidationContext and thread-local
   - `src/config.rs` - context setup during build
   - `premortem-derive/src/lib.rs` - use context in generated code
   - `examples/error-demo/` - remove hardcoded errors, use real validation
 - **External Dependencies**:
   - `toml_edit = "0.22"` (or latest compatible)
+  - No new deps for JSON (uses existing `serde_json` with string scanning)
 
 ## Testing Strategy
 
 - **Unit Tests**:
   - `line_from_offset()` correctly calculates line numbers
+  - `build_line_index()` creates correct index for JSON
   - `flatten_document()` preserves spans from toml_edit
+  - `flatten_json()` finds correct line numbers from content
   - `ValidationContext` lookup works correctly
   - Thread-local context set/get/clear works
 
 - **Integration Tests**:
   - TOML source produces `ConfigValues` with line numbers
+  - JSON source produces `ConfigValues` with line numbers
   - Validation errors include source locations from parsed config
   - Multi-source config preserves correct source per value
-  - Error Display shows `[file:line]` prefix
+  - Error Display shows `[file:line]` prefix for both TOML and JSON
 
 - **End-to-End Tests**:
   - `cargo run --example error-demo` produces expected output
   - Output matches README format exactly
   - No hardcoded line numbers in examples
+  - Test with both TOML and JSON config files
 
 ## Documentation Requirements
 
