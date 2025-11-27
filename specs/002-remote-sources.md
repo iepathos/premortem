@@ -6,6 +6,7 @@ priority: medium
 status: draft
 dependencies: []
 created: 2025-11-25
+updated: 2025-11-26
 ---
 
 # Specification 002: Remote Configuration Source Support
@@ -28,6 +29,20 @@ Common remote configuration sources in production environments include:
 - **Environment-specific URLs** - Custom HTTP endpoints serving JSON/YAML/TOML
 
 This specification focuses on providing a flexible HTTP-based remote source with built-in support for common authentication patterns, while maintaining the testable `ConfigEnv` abstraction.
+
+**Stillwater Integration**: This spec leverages stillwater 0.9.0's `RetryPolicy` for standardized backoff strategies and jitter support. The retry policy is a pure data structure describing retry behavior, while the actual retry execution happens at the I/O boundary—following the "pure core, imperative shell" pattern.
+
+### Why Stillwater for Retry Logic?
+
+1. **Tested, standardized backoff** - Stillwater's `RetryPolicy` provides four backoff strategies (constant, linear, exponential, fibonacci) that are well-tested and follow industry best practices.
+
+2. **Pure data, testable logic** - `RetryPolicy` is a pure data structure. The `delay_for_attempt(n)` method computes delays without side effects, enabling unit tests without timers.
+
+3. **Jitter support** - Built-in jitter strategies (proportional, full, decorrelated) prevent thundering herd problems in distributed systems.
+
+4. **Consistent across crates** - Using stillwater's retry types ensures consistent retry behavior across premortem and other crates in the ecosystem.
+
+5. **Blocking-compatible** - While stillwater's `Effect::retry*` methods require async, the `RetryPolicy` type itself is sync-compatible. We use `delay_for_attempt()` in a blocking loop with `std::thread::sleep()`.
 
 ## Objective
 
@@ -53,7 +68,7 @@ Implement a remote configuration source system that:
    - No authentication (public endpoints)
 4. **Required/Optional Modes**: Support both required (error on failure) and optional (empty on failure) modes
 5. **Timeout Configuration**: Configurable connection and read timeouts
-6. **Retry Logic**: Configurable retry count with exponential backoff
+6. **Retry Logic**: Configurable retry via stillwater's `RetryPolicy` with backoff strategies (constant, linear, exponential, fibonacci) and optional jitter
 7. **Response Parsing**: Parse responses as JSON, TOML, or YAML into `ConfigValues`
 8. **Path Extraction**: Extract nested paths from response (e.g., fetch `/config` but use only `data.app` subtree)
 9. **Custom Naming**: Allow custom source names for error messages
@@ -77,16 +92,19 @@ Implement a remote configuration source system that:
 - [ ] `.optional()` makes failures return empty `ConfigValues` instead of error
 - [ ] `.required()` makes failures return `SourceError::ConnectionError`
 - [ ] `.timeout(Duration::from_secs(30))` sets request timeout
-- [ ] `.retry(3)` sets retry count with exponential backoff
+- [ ] `.retry_policy(RetryPolicy::exponential(...).with_max_retries(3))` sets retry behavior using stillwater
+- [ ] `.retry(3)` convenience method for simple exponential backoff with N retries
 - [ ] `.path("data.config")` extracts nested path from response
 - [ ] `.named("vault-secrets")` sets custom source name
 - [ ] Connection errors are reported as `SourceError::ConnectionError`
+- [ ] Retry exhaustion errors include attempt count and total duration (from stillwater's `RetryExhausted`)
 - [ ] Parse errors include the source URL and response details
 - [ ] Timeout errors are clearly distinguished from connection failures
 - [ ] Authentication failures (401/403) have specific error messages
 - [ ] MockEnv supports mocking HTTP responses for testing
 - [ ] Feature flag `remote` controls compilation
 - [ ] `Remote` is re-exported from `premortem::sources` and `premortem` root
+- [ ] `RetryPolicy` is re-exported from `premortem` when `remote` feature is enabled
 - [ ] No credentials appear in error messages or logs
 
 ## Technical Details
@@ -138,6 +156,8 @@ Implement a remote configuration source system that:
 
 4. **Create remote_source.rs Module**
    ```rust
+   use stillwater::retry::RetryPolicy;
+
    /// Response format for remote configuration
    #[derive(Debug, Clone, Copy, Default)]
    pub enum Format {
@@ -168,7 +188,7 @@ Implement a remote configuration source system that:
        headers: Vec<(String, String)>,
        required: bool,
        timeout: Duration,
-       retries: u32,
+       retry_policy: Option<RetryPolicy>,
        path: Option<String>,
        name: Option<String>,
    }
@@ -176,6 +196,8 @@ Implement a remote configuration source system that:
 
 5. **Builder Pattern Implementation**
    ```rust
+   use stillwater::retry::RetryPolicy;
+
    impl Remote {
        pub fn url(url: impl Into<String>) -> Self {
            Self {
@@ -185,7 +207,7 @@ Implement a remote configuration source system that:
                headers: Vec::new(),
                required: true,
                timeout: Duration::from_secs(30),
-               retries: 0,
+               retry_policy: None,
                path: None,
                name: None,
            }
@@ -233,9 +255,30 @@ Implement a remote configuration source system that:
            self
        }
 
-       pub fn retry(mut self, count: u32) -> Self {
-           self.retries = count;
+       /// Set a custom retry policy using stillwater's RetryPolicy.
+       ///
+       /// Provides full control over backoff strategy, max retries, max delay, and jitter.
+       pub fn retry_policy(mut self, policy: RetryPolicy) -> Self {
+           self.retry_policy = Some(policy);
            self
+       }
+
+       /// Convenience method for simple exponential backoff with N retries.
+       ///
+       /// Equivalent to:
+       /// ```ignore
+       /// .retry_policy(
+       ///     RetryPolicy::exponential(Duration::from_millis(100))
+       ///         .with_max_retries(count)
+       ///         .with_max_delay(Duration::from_secs(10))
+       /// )
+       /// ```
+       pub fn retry(self, count: u32) -> Self {
+           self.retry_policy(
+               RetryPolicy::exponential(Duration::from_millis(100))
+                   .with_max_retries(count)
+                   .with_max_delay(Duration::from_secs(10))
+           )
        }
 
        pub fn path(mut self, path: impl Into<String>) -> Self {
@@ -276,6 +319,68 @@ Implement a remote configuration source system that:
            self.name.as_deref().unwrap_or(&self.url)
        }
    }
+
+   impl Remote {
+       /// Fetch with retry using stillwater's RetryPolicy for delay calculations.
+       ///
+       /// Uses the pure `delay_for_attempt()` method to compute delays without
+       /// requiring async. The retry loop is blocking but uses tested backoff logic.
+       fn fetch_with_retry(
+           &self,
+           env: &dyn ConfigEnv,
+           request: &HttpRequest,
+       ) -> Result<HttpResponse, ConfigErrors> {
+           let policy = match &self.retry_policy {
+               Some(p) => p,
+               None => return self.fetch_once(env, request),
+           };
+
+           let start = std::time::Instant::now();
+           let mut attempt = 0u32;
+           let mut last_error = None;
+
+           loop {
+               match self.fetch_once(env, request) {
+                   Ok(response) if is_retryable_status(response.status) => {
+                       last_error = Some(self.status_to_error(&response));
+                   }
+                   Ok(response) => return Ok(response),
+                   Err(e) if self.is_retryable_error(&e) => {
+                       last_error = Some(e);
+                   }
+                   Err(e) => return Err(e), // Non-retryable error
+               }
+
+               // Check if we should retry
+               if let Some(delay) = policy.delay_for_attempt(attempt) {
+                   std::thread::sleep(delay);
+                   attempt += 1;
+               } else {
+                   // Retries exhausted - return error with metadata
+                   let total_duration = start.elapsed();
+                   return Err(self.retry_exhausted_error(
+                       last_error.unwrap(),
+                       attempt + 1,
+                       total_duration,
+                   ));
+               }
+           }
+       }
+
+       /// Check if an error is retryable (transient).
+       fn is_retryable_error(&self, errors: &ConfigErrors) -> bool {
+           // Only retry connection errors, not parse errors or auth failures
+           errors.iter().any(|e| matches!(
+               e,
+               ConfigError::SourceError { kind: SourceErrorKind::ConnectionError { status: None, .. }, .. }
+           ))
+       }
+   }
+
+   /// HTTP status codes that should trigger retry
+   fn is_retryable_status(status: u16) -> bool {
+       matches!(status, 500..=599 | 408 | 429)
+   }
    ```
 
 ### Architecture Changes
@@ -283,7 +388,16 @@ Implement a remote configuration source system that:
 1. **New File**: `src/sources/remote_source.rs`
 2. **Modified**: `src/env.rs` - Add `fetch_url` method to `ConfigEnv` trait
 3. **Modified**: `src/sources/mod.rs` - Module registration
-4. **Modified**: `src/lib.rs` - Re-export
+4. **Modified**: `src/lib.rs` - Re-export `Remote`, `Format`, `Auth`, and `RetryPolicy`
+
+```rust
+// In lib.rs
+#[cfg(feature = "remote")]
+pub use sources::remote_source::{Auth, Format, Remote};
+
+#[cfg(feature = "remote")]
+pub use stillwater::retry::RetryPolicy;
+```
 
 ### ConfigEnv Extension
 
@@ -390,6 +504,13 @@ pub enum SourceErrorKind {
         status: Option<u16>,
         message: String,
     },
+    /// Retries exhausted - includes metadata from stillwater's RetryExhausted pattern
+    RetryExhausted {
+        url: String,
+        attempts: u32,
+        total_duration: Duration,
+        last_error: String,
+    },
     Other { message: String },
 }
 ```
@@ -398,11 +519,13 @@ Error scenarios:
 - **Connection Timeout**: `ConnectionError` with "request timed out" message
 - **Connection Refused**: `ConnectionError` with "connection refused" message
 - **DNS Failure**: `ConnectionError` with "could not resolve host" message
-- **HTTP 401**: `ConnectionError` with "authentication failed" message
-- **HTTP 403**: `ConnectionError` with "access forbidden" message
-- **HTTP 404**: `NotFound` error
-- **HTTP 5xx**: `ConnectionError` with status code and body excerpt
-- **Parse Error**: `ParseError` with format and error details
+- **HTTP 401**: `ConnectionError` with "authentication failed" message (not retried)
+- **HTTP 403**: `ConnectionError` with "access forbidden" message (not retried)
+- **HTTP 404**: `NotFound` error (not retried)
+- **HTTP 5xx**: `ConnectionError` with status code and body excerpt (retried)
+- **HTTP 408/429**: `ConnectionError` (retried - timeout/rate limit)
+- **Retry Exhausted**: `RetryExhausted` with attempt count, total duration, and last error
+- **Parse Error**: `ParseError` with format and error details (not retried)
 
 ### Security Considerations
 
@@ -417,10 +540,14 @@ Error scenarios:
 - **Affected Components**:
   - `Cargo.toml` - new dependency
   - `src/env.rs` - ConfigEnv trait extension
-  - `src/error.rs` - ConnectionError variant
+  - `src/error.rs` - ConnectionError and RetryExhausted variants
   - `src/sources/mod.rs` - module registration
   - `src/lib.rs` - re-export
-- **External Dependencies**: `reqwest` crate (blocking feature)
+- **External Dependencies**:
+  - `reqwest` crate (blocking feature) - HTTP client
+  - `stillwater` crate (already a dependency) - RetryPolicy for backoff strategies
+- **Optional Dependencies**:
+  - `stillwater/jitter` feature - for jitter support in retry policies
 
 ## Testing Strategy
 
@@ -450,9 +577,18 @@ Error scenarios:
    - `test_remote_path_extraction` - Extract nested path from response
    - `test_remote_custom_name` - Custom source naming
    - `test_remote_timeout_config` - Timeout configuration
-   - `test_remote_retry_config` - Retry behavior (mock multiple failures then success)
 
-5. **Security**
+5. **Retry Behavior** (using stillwater's RetryPolicy)
+   - `test_remote_retry_exponential` - Exponential backoff with stillwater policy
+   - `test_remote_retry_linear` - Linear backoff strategy
+   - `test_remote_retry_with_jitter` - Jitter reduces thundering herd
+   - `test_remote_retry_success_after_failures` - Mock failures then success
+   - `test_remote_retry_exhausted_metadata` - Error includes attempts and duration
+   - `test_remote_retry_only_transient` - 4xx errors not retried
+   - `test_remote_retry_5xx` - 5xx errors are retried
+   - `test_remote_retry_429_rate_limit` - Rate limit responses retried
+
+6. **Security**
    - `test_credentials_not_in_errors` - Verify no credentials in error messages
    - `test_sensitive_headers_redacted` - Debug output hides secrets
 
@@ -489,30 +625,51 @@ Not required for initial implementation.
 ### Architecture Updates
 
 - Document ConfigEnv trait extension
-- Document ConnectionError variant
+- Document ConnectionError and RetryExhausted variants
+- Document stillwater `RetryPolicy` integration pattern
 
 ## Implementation Notes
 
 ### Consul Integration Example
 
 ```rust
-// HashiCorp Consul KV
+use stillwater::retry::RetryPolicy;
+
+// HashiCorp Consul KV with custom retry policy
 let consul = Remote::url("http://localhost:8500/v1/kv/myapp/config?raw")
     .format(Format::Json)
     .header("X-Consul-Token", std::env::var("CONSUL_TOKEN").unwrap())
     .timeout(Duration::from_secs(5))
-    .retry(3);
+    .retry_policy(
+        RetryPolicy::exponential(Duration::from_millis(100))
+            .with_max_retries(5)
+            .with_max_delay(Duration::from_secs(5))
+            .with_jitter(0.25)  // Requires stillwater jitter feature
+    );
+
+// Or use the convenience method
+let consul_simple = Remote::url("http://localhost:8500/v1/kv/myapp/config?raw")
+    .format(Format::Json)
+    .header("X-Consul-Token", std::env::var("CONSUL_TOKEN").unwrap())
+    .timeout(Duration::from_secs(5))
+    .retry(3);  // Simple exponential backoff
 ```
 
 ### Vault Integration Example
 
 ```rust
-// HashiCorp Vault KV v2
+use stillwater::retry::RetryPolicy;
+
+// HashiCorp Vault KV v2 with linear backoff (for rate limiting)
 let vault = Remote::url("http://localhost:8200/v1/secret/data/myapp")
     .format(Format::Json)
     .bearer_token(std::env::var("VAULT_TOKEN").unwrap())
     .path("data.data")  // Vault wraps secrets in data.data
-    .timeout(Duration::from_secs(10));
+    .timeout(Duration::from_secs(10))
+    .retry_policy(
+        RetryPolicy::linear(Duration::from_millis(500))
+            .with_max_retries(3)
+    );
 ```
 
 ### AWS Parameter Store (via HTTP)
@@ -525,29 +682,66 @@ let ssm = Remote::url("https://ssm.us-east-1.amazonaws.com/")
     // AWS Signature V4 would need separate auth implementation
 ```
 
-### Retry Behavior
+### Retry Behavior (via stillwater)
 
-Exponential backoff with jitter:
-- Retry 1: 100ms + random(0-50ms)
-- Retry 2: 200ms + random(0-100ms)
-- Retry 3: 400ms + random(0-200ms)
-- Max delay capped at 10 seconds
+Stillwater's `RetryPolicy` provides four backoff strategies:
 
-Only retry on:
-- Connection failures
-- Timeout errors
-- HTTP 5xx responses
+1. **Constant**: Fixed delay between retries
+   ```rust
+   RetryPolicy::constant(Duration::from_millis(100))
+   ```
 
-Do not retry on:
-- HTTP 4xx responses (client errors)
+2. **Linear**: Delay increases linearly: `base * (attempt + 1)`
+   ```rust
+   RetryPolicy::linear(Duration::from_millis(100))
+   // Delays: 100ms, 200ms, 300ms, 400ms...
+   ```
+
+3. **Exponential**: Delay doubles: `base * 2^attempt`
+   ```rust
+   RetryPolicy::exponential(Duration::from_millis(100))
+   // Delays: 100ms, 200ms, 400ms, 800ms...
+   ```
+
+4. **Fibonacci**: Delay follows Fibonacci sequence
+   ```rust
+   RetryPolicy::fibonacci(Duration::from_millis(100))
+   // Delays: 100ms, 100ms, 200ms, 300ms, 500ms...
+   ```
+
+**Jitter support** (requires `stillwater/jitter` feature):
+- `.with_jitter(0.25)` - ±25% proportional jitter
+- `.with_full_jitter()` - Random between 0 and calculated delay
+- `.with_decorrelated_jitter()` - AWS-style decorrelated jitter
+
+**Bounds** (at least one required by stillwater):
+- `.with_max_retries(5)` - Maximum retry attempts
+- `.with_max_delay(Duration::from_secs(30))` - Cap on delay growth
+
+**Only retry on transient errors:**
+- Connection failures (timeout, refused, DNS)
+- HTTP 5xx responses (server errors)
+- HTTP 408 (request timeout)
+- HTTP 429 (rate limited)
+
+**Do not retry on:**
+- HTTP 4xx responses (client errors like 401, 403, 404)
 - Parse errors
 
 ### Feature Flag Testing
 
 ```bash
+# Basic remote support
 cargo test --features remote
+
+# Remote with format support
 cargo test --features "remote,toml"
 cargo test --features "remote,yaml"
+
+# Remote with jitter support (for advanced retry policies)
+cargo test --features "remote" --features stillwater/jitter
+
+# All features
 cargo test --all-features
 ```
 
@@ -556,6 +750,7 @@ cargo test --all-features
 ### Breaking Changes
 
 - `SourceErrorKind` gains new `ConnectionError` variant
+- `SourceErrorKind` gains new `RetryExhausted` variant (with attempt/duration metadata)
 
 ### Migration Requirements
 
