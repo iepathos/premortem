@@ -110,7 +110,7 @@ premortem = { version = "0.3", features = ["json", "watch"] }
 | `json` | JSON file support |
 | `yaml` | YAML file support |
 | `watch` | Hot reload / file watching |
-| `remote` | Remote sources (Consul, etcd, Vault, etc.) |
+| `remote` | Remote sources (planned) |
 | `full` | All features |
 
 ## Examples
