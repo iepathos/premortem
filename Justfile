@@ -1,35 +1,15 @@
 # Premortem - Justfile
-# Quick development commands for Rust projects
+# Quick development commands for Rust library projects
 
 # Default recipe - show available commands
 default:
     @just --list
 
 # Development commands
-alias d := dev
-alias r := run
 alias t := test
 alias c := check
 alias f := fmt
 alias l := lint
-
-# === DEVELOPMENT ===
-
-# Run the project in development mode
-dev:
-    cargo run
-
-# Run the project with hot reloading
-watch:
-    cargo watch -x run
-
-# Run the project in release mode
-run:
-    cargo run --release
-
-# Run with all features enabled
-run-all:
-    cargo run --all-features
 
 # === BUILDING ===
 
@@ -40,10 +20,6 @@ build:
 # Build in release mode
 build-release:
     cargo build --release
-
-# Build with optimizations for native CPU
-build-native:
-    RUSTFLAGS="-C target-cpu=native" cargo build --release
 
 # Clean build artifacts
 clean:
@@ -72,9 +48,8 @@ test-watch:
 # Run tests with coverage using llvm-cov
 coverage:
     #!/usr/bin/env bash
-    # Ensure rustup's cargo is in PATH (needed for llvm-tools-preview)
     export PATH="$HOME/.cargo/bin:$PATH"
-    echo "Building premortem for integration tests..."
+    echo "Building premortem..."
     cargo build
     echo "Cleaning previous coverage data..."
     cargo llvm-cov clean
@@ -85,19 +60,16 @@ coverage:
 # Run tests with coverage (lcov format)
 coverage-lcov:
     #!/usr/bin/env bash
-    set -euo pipefail  # Exit on error, undefined variables, and pipe failures
-    # Ensure rustup's cargo is in PATH (needed for llvm-tools-preview)
+    set -euo pipefail
     export PATH="$HOME/.cargo/bin:$PATH"
-    echo "Building premortem for integration tests..."
+    echo "Building premortem..."
     cargo build
     echo "Cleaning previous coverage data..."
     cargo llvm-cov clean
-    # Ensure target/coverage directory exists
     mkdir -p target/coverage
     echo "Generating code coverage report with llvm-cov (lcov format)..."
     cargo llvm-cov --all-features --lib --lcov --output-path target/coverage/lcov.info
     echo "Coverage report generated at target/coverage/lcov.info"
-    # Verify the file was actually created
     if [ ! -f target/coverage/lcov.info ]; then
         echo "ERROR: Coverage file was not generated at target/coverage/lcov.info"
         exit 1
@@ -106,9 +78,8 @@ coverage-lcov:
 # Run tests with coverage and check threshold
 coverage-check:
     #!/usr/bin/env bash
-    # Ensure rustup's cargo is in PATH (needed for llvm-tools-preview)
     export PATH="$HOME/.cargo/bin:$PATH"
-    echo "Building premortem for integration tests..."
+    echo "Building premortem..."
     cargo build
     echo "Checking code coverage threshold..."
     cargo llvm-cov clean
@@ -117,10 +88,10 @@ coverage-check:
     COVERAGE=$(cat target/coverage/coverage.json | jq -r '.data[0].totals.lines.percent')
     echo "Current coverage: ${COVERAGE}%"
     if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-        echo "⚠️  Coverage is below 80%: $COVERAGE%"
+        echo "Warning: Coverage is below 80%: $COVERAGE%"
         exit 1
     else
-        echo "✅ Coverage meets 80% threshold: $COVERAGE%"
+        echo "Coverage meets 80% threshold: $COVERAGE%"
     fi
 
 # Open coverage report in browser
@@ -130,7 +101,6 @@ coverage-open: coverage
 # Analyze the current repository with coverage data
 analyze-self:
     #!/usr/bin/env bash
-    # Ensure rustup's cargo is in PATH (needed for llvm-tools-preview)
     export PATH="$HOME/.cargo/bin:$PATH"
     echo "Building premortem..."
     cargo build
@@ -180,7 +150,7 @@ lint:
 
 # Run clippy with all targets
 lint-all:
-    cargo clippy --lib --bins --tests --all-features -- -D warnings
+    cargo clippy --lib --tests --all-features -- -D warnings
 
 # Quick check without building
 check:
@@ -262,8 +232,7 @@ new-example NAME:
 
 # Run all CI checks locally (matches GitHub Actions)
 ci:
-    @echo "Running CI checks (matching GitHub Actions)..."
-    @echo "Setting environment variables..."
+    @echo "Running CI checks..."
     @export CARGO_TERM_COLOR=always && \
      export CARGO_INCREMENTAL=0 && \
      export RUSTFLAGS="-Dwarnings" && \
@@ -272,7 +241,7 @@ ci:
      cargo nextest run --all-features && \
      echo "Running doctests..." && \
      cargo test --doc --all-features && \
-     echo "Running clippy (including benchmarks)..." && \
+     echo "Running clippy..." && \
      cargo clippy --all-targets --all-features -- -D warnings && \
      echo "Checking formatting..." && \
      cargo fmt --all -- --check && \
@@ -289,23 +258,21 @@ ci:
 test-compatibility:
     cargo nextest run --test compatibility -j 1
 
-# Run performance tests only  
+# Run performance tests only
 test-performance:
     cargo nextest run --test performance
 
-# Full CI build pipeline (equivalent to scripts/ci-build.sh)
+# Full CI build pipeline
 ci-build:
     @echo "Building premortem..."
     @echo "Checking code formatting..."
     cargo fmt --all -- --check
     @echo "Running clippy..."
-    cargo clippy --lib --bins --tests --all-features -- -D warnings
+    cargo clippy --lib --tests --all-features -- -D warnings
     @echo "Building project..."
     cargo build --release
     @echo "Running tests..."
     cargo nextest run --all
-    # @echo "Building benchmarks..."
-    # cargo bench --no-run  # TODO: Update benchmarks for new storage API
     @echo "Build successful!"
 
 # Pre-commit hook simulation
@@ -336,7 +303,7 @@ install-hooks:
             hook_name=$(basename "$hook")
             cp "$hook" ".git/hooks/$hook_name"
             chmod +x ".git/hooks/$hook_name"
-            echo "  ✓ Installed $hook_name"
+            echo "  Installed $hook_name"
         fi
     done
     echo "Git hooks installed successfully!"
@@ -352,12 +319,6 @@ release:
     cargo publish
 
 # === ADVANCED ===
-
-# Profile the application
-profile:
-    cargo build --release
-    perf record --call-graph=dwarf ./target/release/$(basename $(pwd))
-    perf report
 
 # Expand macros for debugging
 expand:
@@ -380,7 +341,6 @@ duplicate-deps:
 # Show detailed help for cargo commands
 help:
     @echo "Cargo commands reference:"
-    @echo "  cargo run      - Run the project"
     @echo "  cargo test     - Run tests"
     @echo "  cargo build    - Build the project"
     @echo "  cargo fmt      - Format code"
