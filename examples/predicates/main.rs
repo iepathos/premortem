@@ -35,6 +35,7 @@ impl Validate for ServerConfig {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn main() -> Result<(), ConfigErrors> {
     // Create mock environment for example
     let env = MockEnv::new().with_file(
