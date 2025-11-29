@@ -282,6 +282,160 @@ For convenience, premortem re-exports commonly used stillwater types:
 pub use stillwater::{NonEmptyVec, Semigroup, Validation};
 ```
 
+## Validation with Predicates
+
+Premortem integrates with stillwater 0.13's composable predicates for elegant, reusable validation logic.
+
+### Basic Usage
+
+Use `validate_with_predicate()` for simple predicate-based validation with custom error messages:
+
+```rust
+use premortem::prelude::*;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+struct ServerConfig {
+    host: String,
+    port: u16,
+}
+
+impl Validate for ServerConfig {
+    fn validate(&self) -> ConfigValidation<()> {
+        let validations = vec![
+            validate_with_predicate(
+                &self.host,
+                "host",
+                not_empty(),
+                "host cannot be empty"
+            ),
+            validate_with_predicate(
+                &self.port,
+                "port",
+                between(1, 65535),
+                "port must be between 1 and 65535"
+            ),
+        ];
+
+        Validation::all_vec(validations).map(|_| ())
+    }
+}
+```
+
+### Composition Patterns
+
+Predicates compose elegantly using `.and()`, `.or()`, and `.not()`:
+
+```rust
+use premortem::prelude::*;
+
+// Combine multiple predicates
+let username_valid = not_empty()
+    .and(len_between(3, 20))
+    .and(starts_with(|c: char| c.is_alphabetic()));
+
+validate_with_predicate(
+    &username,
+    "username",
+    username_valid,
+    "username must be 3-20 chars, non-empty, starting with letter"
+)
+```
+
+### Available Predicates
+
+#### String Predicates
+
+| Predicate | Description |
+|-----------|-------------|
+| `not_empty()` | String must not be empty |
+| `len_min(n)` | Minimum length |
+| `len_max(n)` | Maximum length |
+| `len_eq(n)` | Exact length |
+| `len_between(min, max)` | Length in range (inclusive) |
+| `starts_with(s)` | Starts with string/char/predicate |
+| `ends_with(s)` | Ends with string/char/predicate |
+| `contains(s)` | Contains substring |
+| `is_alphabetic()` | All characters alphabetic |
+| `is_alphanumeric()` | All characters alphanumeric |
+| `is_numeric()` | All characters numeric |
+
+#### Numeric Predicates
+
+| Predicate | Description |
+|-----------|-------------|
+| `gt(n)` | Greater than |
+| `ge(n)` | Greater than or equal |
+| `lt(n)` | Less than |
+| `le(n)` | Less than or equal |
+| `eq(n)` | Equal to |
+| `ne(n)` | Not equal to |
+| `between(min, max)` | In range (inclusive) |
+| `positive()` | Greater than zero |
+| `negative()` | Less than zero |
+| `non_negative()` | Greater than or equal to zero |
+
+#### Collection Predicates
+
+| Predicate | Description |
+|-----------|-------------|
+| `has_len(n)` | Exact collection length |
+| `has_min_len(n)` | Minimum collection length |
+| `has_max_len(n)` | Maximum collection length |
+| `is_empty()` | Collection is empty |
+| `is_not_empty()` | Collection is not empty |
+| `all(predicate)` | All elements satisfy predicate |
+| `any(predicate)` | Any element satisfies predicate |
+| `contains_element(value)` | Collection contains value |
+
+### Integration with validate_field
+
+Convert predicates to validators using `from_predicate()`:
+
+```rust
+use premortem::prelude::*;
+use premortem::validate::from_predicate;
+
+impl Validate for AppConfig {
+    fn validate(&self) -> ConfigValidation<()> {
+        // Mix predicates with traditional validators
+        let username_pred = from_predicate(
+            not_empty().and(len_between(3, 20))
+        );
+
+        validate_field(&self.username, "username", &[&username_pred])
+    }
+}
+```
+
+### Advanced: Complex Composition
+
+Build sophisticated validation rules by composing predicates:
+
+```rust
+use premortem::prelude::*;
+
+// Password validation: 8-64 chars, contains digit and letter
+let password_pred = len_between(8, 64)
+    .and(any(|c: char| c.is_numeric()))
+    .and(any(|c: char| c.is_alphabetic()));
+
+validate_with_predicate(
+    &password,
+    "password",
+    password_pred,
+    "password must be 8-64 chars with letters and numbers"
+)
+```
+
+### Benefits of Predicates
+
+- **Composable**: Use `.and()`, `.or()`, `.not()` to build complex rules
+- **Reusable**: Define once, use across multiple fields
+- **Type-safe**: Compile-time guarantees
+- **Zero-cost**: No runtime overhead
+- **Tested**: Stillwater predicates are thoroughly tested with property-based tests
+
 ## Common Patterns
 
 ### Custom Validation
