@@ -107,17 +107,17 @@ impl ConfigValues {
 enum PathSegment {
     /// Object key like "database" in "database.host"
     Key(String),
-    /// Array index like 0 in "hosts[0]"
+    /// Array index like 0 in "hosts\[0\]"
     Index(usize),
 }
 
 /// Parse a path string into segments.
 ///
 /// Handles paths like:
-/// - "database.host" -> [Key("database"), Key("host")]
-/// - "hosts[0]" -> [Key("hosts"), Index(0)]
-/// - "servers[0].host" -> [Key("servers"), Index(0), Key("host")]
-/// - "matrix[0][1]" -> [Key("matrix"), Index(0), Index(1)]
+/// - "database.host" -> \[Key("database"), Key("host")\]
+/// - "hosts\[0\]" -> \[Key("hosts"), Index(0)\]
+/// - "servers\[0\].host" -> \[Key("servers"), Index(0), Key("host")\]
+/// - "matrix\[0\]\[1\]" -> \[Key("matrix"), Index(0), Index(1)\]
 fn parse_path(path: &str) -> Vec<PathSegment> {
     let mut segments = Vec::new();
     let mut current = String::new();
