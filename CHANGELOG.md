@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Stillwater 0.13.0 Predicate Integration** - Support for composable validation using stillwater predicates
+  - `from_predicate()` - Convert stillwater predicates to premortem validators
+  - `validate_with_predicate()` - Validate fields using predicates with custom error messages
+  - Re-exported predicate combinators from stillwater in prelude
+  - Predicate examples demonstrating validation composition
+
+### Changed
+
+- Updated stillwater dependency from 0.11.0 to 0.13.0
+
 ## [0.4.0] - 2025-11-27
 
 ### Changed

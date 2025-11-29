@@ -139,8 +139,9 @@ pub use source::{merge_config_values, ConfigValues, Source};
 pub use trace::{TraceBuilder, TracedConfig, TracedValue, ValueTrace};
 pub use validate::validators;
 pub use validate::{
-    current_source_location, custom, validate_field, validate_nested, validate_optional_nested,
-    with_validation_context, SourceLocationMap, Validate, ValidationContext, Validator, When,
+    current_source_location, custom, from_predicate, validate_field, validate_nested,
+    validate_optional_nested, validate_with_predicate, with_validation_context, SourceLocationMap,
+    Validate, ValidationContext, Validator, When,
 };
 pub use value::{ConfigValue, Value};
 
@@ -160,6 +161,9 @@ pub use watch::{ConfigEvent, ConfigWatcher, WatchedConfig};
 
 // Re-export stillwater types that are commonly used
 pub use stillwater::{NonEmptyVec, Semigroup, Validation};
+
+// Re-export stillwater predicate module and types (0.13.0+)
+pub use stillwater::predicate::{self, Predicate, PredicateExt};
 
 // Re-export derive macro when the feature is enabled
 #[cfg(feature = "derive")]

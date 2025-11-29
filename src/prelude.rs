@@ -96,6 +96,9 @@ pub use stillwater::Semigroup;
 /// preventing "empty error list" bugs.
 pub use stillwater::NonEmptyVec;
 
+// Re-export stillwater predicates for composable validation (stillwater 0.13.0+)
+pub use stillwater::predicate::prelude::*;
+
 // ============================================================================
 // Error types
 // ============================================================================
@@ -213,6 +216,44 @@ pub use crate::validate::custom;
 
 /// Conditional validator that only runs when a condition is true.
 pub use crate::validate::When;
+
+// ============================================================================
+// Predicate-Validator Bridge (stillwater 0.13.0+)
+// ============================================================================
+
+/// Convert a stillwater predicate into a premortem validator.
+///
+/// This enables using composable predicates from stillwater 0.13.0+ within
+/// premortem's validation framework.
+///
+/// # Example
+///
+/// ```ignore
+/// use premortem::prelude::*;
+///
+/// let validator = from_predicate(not_empty().and(len_min(3)));
+/// validate_field(&username, "username", &[&validator])
+/// ```
+pub use crate::validate::from_predicate;
+
+/// Validate a value using a predicate with a custom error message.
+///
+/// This is a convenience function that makes predicate-based validation
+/// ergonomic with custom error messages.
+///
+/// # Example
+///
+/// ```ignore
+/// use premortem::prelude::*;
+///
+/// validate_with_predicate(
+///     &port,
+///     "port",
+///     between(1, 65535),
+///     "port must be between 1 and 65535"
+/// )
+/// ```
+pub use crate::validate::validate_with_predicate;
 
 // ============================================================================
 // Built-in validators
