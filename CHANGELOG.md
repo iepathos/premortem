@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-11-29
+
 ### Added
 
 - **Stillwater 0.13.0 Predicate Integration** - Support for composable validation using stillwater predicates
@@ -18,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated stillwater dependency from 0.11.0 to 0.13.0
+
+### Fixed
+
+- Suppressed clippy `result_large_err` warning in predicates example
 
 ## [0.4.0] - 2025-11-27
 
@@ -114,7 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `serde` 1.0 - Serialization/deserialization
 - `serde_json` 1.0 - JSON support
 
-[Unreleased]: https://github.com/iepathos/premortem/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/iepathos/premortem/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/iepathos/premortem/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/iepathos/premortem/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/iepathos/premortem/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/iepathos/premortem/compare/v0.1.1...v0.2.0
