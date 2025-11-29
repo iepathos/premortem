@@ -278,6 +278,103 @@ fn fail(error: ConfigError) -> ConfigValidation<()> {
 }
 
 // ============================================================================
+// Predicate-Validator Bridge (stillwater 0.13.0+)
+// ============================================================================
+
+use stillwater::predicate::Predicate;
+
+/// Adapter that converts a `Predicate<T>` into a `Validator<T>`.
+///
+/// This enables using stillwater's composable predicates within premortem's
+/// validation framework while maintaining source location tracking.
+///
+/// # Example
+///
+/// ```ignore
+/// use premortem::validate::from_predicate;
+/// use premortem::prelude::*;
+///
+/// let validator = from_predicate(
+///     not_empty().and(len_between(3, 20))
+/// );
+///
+/// // Use in validate_field
+/// validate_field(&username, "username", &[&validator])
+/// ```
+pub fn from_predicate<T>(predicate: impl Predicate<T>) -> impl Validator<T>
+where
+    T: ?Sized,
+{
+    PredicateValidator(predicate)
+}
+
+/// Internal adapter struct that implements Validator for any Predicate.
+struct PredicateValidator<P>(P);
+
+impl<T, P> Validator<T> for PredicateValidator<P>
+where
+    T: ?Sized,
+    P: Predicate<T>,
+{
+    fn validate(&self, value: &T, path: &str) -> ConfigValidation<()> {
+        if self.0.check(value) {
+            Validation::Success(())
+        } else {
+            // Get source location from thread-local context
+            let source_location = current_source_location(path);
+
+            Validation::Failure(ConfigErrors::single(ConfigError::ValidationError {
+                path: path.to_string(),
+                source_location,
+                value: None, // Predicates don't provide value formatting
+                message: "validation failed".to_string(),
+            }))
+        }
+    }
+}
+
+/// Validate a field using a predicate with custom error message.
+///
+/// This is a convenience function that combines predicate testing with
+/// premortem's error accumulation.
+///
+/// # Example
+///
+/// ```ignore
+/// use premortem::validate::validate_with_predicate;
+/// use premortem::prelude::*;
+///
+/// validate_with_predicate(
+///     &port,
+///     "port",
+///     between(1, 65535),
+///     "port must be between 1 and 65535"
+/// )
+/// ```
+pub fn validate_with_predicate<T>(
+    value: &T,
+    path: &str,
+    predicate: impl Predicate<T>,
+    message: impl Into<String>,
+) -> ConfigValidation<()>
+where
+    T: ?Sized,
+{
+    if predicate.check(value) {
+        Validation::Success(())
+    } else {
+        let source_location = current_source_location(path);
+
+        Validation::Failure(ConfigErrors::single(ConfigError::ValidationError {
+            path: path.to_string(),
+            source_location,
+            value: None,
+            message: message.into(),
+        }))
+    }
+}
+
+// ============================================================================
 // Validation Helper Functions
 // ============================================================================
 
@@ -1891,5 +1988,231 @@ mod tests {
             // Pop outer prefix
             pop_path_prefix();
         });
+    }
+
+    // ========================================================================
+    // Predicate Bridge Tests (stillwater 0.13.0+)
+    // ========================================================================
+
+    use stillwater::predicate::prelude::*;
+
+    #[test]
+    fn test_from_predicate_success() {
+        let validator = from_predicate(not_empty());
+        let result = validator.validate("hello", "field");
+        assert!(result.is_success());
+    }
+
+    #[test]
+    fn test_from_predicate_failure() {
+        let validator = from_predicate(not_empty());
+        let result = validator.validate("", "field");
+        assert!(result.is_failure());
+
+        if let Validation::Failure(errors) = result {
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors.first().path(), Some("field"));
+        }
+    }
+
+    #[test]
+    fn test_validate_with_predicate_success() {
+        let result = validate_with_predicate(
+            &42,
+            "port",
+            between(1, 65535),
+            "port must be between 1 and 65535",
+        );
+        assert!(result.is_success());
+    }
+
+    #[test]
+    fn test_validate_with_predicate_failure() {
+        let result = validate_with_predicate(
+            &0,
+            "port",
+            between(1, 65535),
+            "port must be between 1 and 65535",
+        );
+        assert!(result.is_failure());
+
+        if let Validation::Failure(errors) = result {
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors.first().path(), Some("port"));
+            // Check that custom message is used
+            if let ConfigError::ValidationError { message, .. } = errors.first() {
+                assert_eq!(message, "port must be between 1 and 65535");
+            } else {
+                panic!("Expected ValidationError");
+            }
+        }
+    }
+
+    #[test]
+    fn test_validate_with_predicate_custom_message() {
+        let result = validate_with_predicate("", "username", not_empty(), "username is required");
+
+        assert!(result.is_failure());
+
+        if let Validation::Failure(errors) = result {
+            if let ConfigError::ValidationError { message, .. } = errors.first() {
+                assert_eq!(message, "username is required");
+            } else {
+                panic!("Expected ValidationError");
+            }
+        }
+    }
+
+    #[test]
+    fn test_predicate_preserves_source_location() {
+        let mut locations = SourceLocationMap::new();
+        locations.insert(
+            "host".to_string(),
+            SourceLocation::new("config.toml").with_line(5),
+        );
+
+        let ctx = ValidationContext::new(locations);
+
+        with_validation_context(ctx, || {
+            let result = validate_with_predicate("", "host", not_empty(), "host cannot be empty");
+
+            assert!(result.is_failure());
+
+            if let Validation::Failure(errors) = result {
+                let err = errors.first();
+                assert_eq!(
+                    err.source_location().map(|l| l.source.as_str()),
+                    Some("config.toml")
+                );
+                assert_eq!(err.source_location().and_then(|l| l.line), Some(5));
+            }
+        });
+    }
+
+    #[test]
+    fn test_predicate_with_nested_validation() {
+        let mut locations = SourceLocationMap::new();
+        locations.insert(
+            "database.host".to_string(),
+            SourceLocation::new("config.toml").with_line(10),
+        );
+
+        let ctx = ValidationContext::new(locations);
+
+        with_validation_context(ctx, || {
+            push_path_prefix("database");
+            let result = validate_with_predicate("", "host", not_empty(), "host required");
+            pop_path_prefix();
+
+            assert!(result.is_failure());
+
+            if let Validation::Failure(errors) = result {
+                let err = errors.first();
+                assert_eq!(err.source_location().and_then(|l| l.line), Some(10));
+            }
+        });
+    }
+
+    #[test]
+    fn test_complex_string_predicate() {
+        // Valid username: non-empty and at least 3 chars
+        assert!(validate_with_predicate(
+            "user123",
+            "username",
+            len_min(3),
+            "must be at least 3 chars"
+        )
+        .is_success());
+
+        // Too short
+        assert!(
+            validate_with_predicate("ab", "username", len_min(3), "must be at least 3 chars")
+                .is_failure()
+        );
+
+        // Test length range
+        assert!(validate_with_predicate(
+            "hello",
+            "field",
+            len_between(3, 10),
+            "length must be 3-10 chars"
+        )
+        .is_success());
+        assert!(validate_with_predicate(
+            "hi",
+            "field",
+            len_between(3, 10),
+            "length must be 3-10 chars"
+        )
+        .is_failure());
+    }
+
+    #[test]
+    fn test_numeric_range_predicate() {
+        let pred = gt(0).and(le(65535));
+        let validator = from_predicate(pred);
+
+        // Valid ports
+        assert!(validator.validate(&1, "port").is_success());
+        assert!(validator.validate(&8080, "port").is_success());
+        assert!(validator.validate(&65535, "port").is_success());
+
+        // Invalid ports
+        assert!(validator.validate(&0, "port").is_failure());
+        assert!(validator.validate(&65536, "port").is_failure());
+        assert!(validator.validate(&-1, "port").is_failure());
+    }
+
+    #[test]
+    fn test_string_length_predicates() {
+        // Length minimum
+        assert!(validate_with_predicate("hello", "field", len_min(3), "min 3 chars").is_success());
+        assert!(validate_with_predicate("hi", "field", len_min(3), "min 3 chars").is_failure());
+
+        // Length maximum
+        assert!(
+            validate_with_predicate("hello", "field", len_max(10), "max 10 chars").is_success()
+        );
+        assert!(
+            validate_with_predicate("verylongstring", "field", len_max(10), "max 10 chars")
+                .is_failure()
+        );
+
+        // Exact length
+        assert!(
+            validate_with_predicate("hello", "field", len_eq(5), "exactly 5 chars").is_success()
+        );
+        assert!(validate_with_predicate("hi", "field", len_eq(5), "exactly 5 chars").is_failure());
+    }
+
+    #[test]
+    fn test_predicate_and_validator_together() {
+        // Mix predicate-based and traditional validators
+        let pred_validator = from_predicate(len_min(3));
+        let trad_validator = NonEmpty;
+
+        let result = validate_field("hello", "field", &[&trad_validator, &pred_validator]);
+        assert!(result.is_success());
+
+        // Fails traditional validator
+        let result = validate_field("", "field", &[&trad_validator, &pred_validator]);
+        assert!(result.is_failure());
+
+        // Fails predicate validator
+        let result = validate_field("hi", "field", &[&trad_validator, &pred_validator]);
+        assert!(result.is_failure());
+    }
+
+    #[test]
+    fn test_validate_field_with_predicate() {
+        let validator = from_predicate(between(1, 100));
+
+        // Valid value
+        let result = validate_field(&50, "value", &[&validator]);
+        assert!(result.is_success());
+
+        // Invalid value
+        let result = validate_field(&150, "value", &[&validator]);
+        assert!(result.is_failure());
     }
 }
