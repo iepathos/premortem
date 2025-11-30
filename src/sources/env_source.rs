@@ -64,6 +64,7 @@ pub struct Env {
     list_separator: Option<String>,
     custom_mappings: HashMap<String, String>,
     excluded: HashSet<String>,
+    required_vars: HashSet<String>,
 }
 
 impl Env {
@@ -89,6 +90,7 @@ impl Env {
             list_separator: None,
             custom_mappings: HashMap::new(),
             excluded: HashSet::new(),
+            required_vars: HashSet::new(),
         }
     }
 
@@ -210,6 +212,49 @@ impl Env {
         self.list_separator = Some(sep.into());
         self
     }
+
+    /// Mark an environment variable as required.
+    ///
+    /// The variable name should be specified WITHOUT the prefix.
+    /// For example, with `Env::prefix("APP_")`:
+    /// - `.require("DATABASE_URL")` checks for `APP_DATABASE_URL`
+    ///
+    /// Missing required variables will cause `load()` to fail with
+    /// accumulated errors for ALL missing variables.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use premortem::Env;
+    ///
+    /// let source = Env::prefix("APP_")
+    ///     .require("JWT_SECRET")
+    ///     .require("DATABASE_URL");
+    /// ```
+    pub fn require(mut self, var_name: impl Into<String>) -> Self {
+        self.required_vars.insert(var_name.into());
+        self
+    }
+
+    /// Mark multiple environment variables as required.
+    ///
+    /// Convenience method for requiring multiple variables at once.
+    /// All variable names should be specified WITHOUT the prefix.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use premortem::Env;
+    ///
+    /// let source = Env::prefix("APP_")
+    ///     .require_all(&["JWT_SECRET", "DATABASE_URL", "API_KEY"]);
+    /// ```
+    pub fn require_all(mut self, var_names: &[&str]) -> Self {
+        for name in var_names {
+            self.required_vars.insert(name.to_string());
+        }
+        self
+    }
 }
 
 #[cfg(feature = "watch")]
@@ -221,6 +266,31 @@ impl Source for Env {
     /// The `ConfigEnv` parameter enables dependency injection for testing.
     /// In production, use `RealEnv`; in tests, use `MockEnv`.
     fn load(&self, env: &dyn ConfigEnv) -> Result<ConfigValues, ConfigErrors> {
+        use crate::error::ConfigError;
+
+        // FIRST: Check all required environment variables
+        let mut errors = Vec::new();
+        for var_name in &self.required_vars {
+            let full_name = if self.prefix.is_empty() {
+                var_name.clone()
+            } else {
+                format!("{}{}", self.prefix, var_name)
+            };
+
+            if env.get_env(&full_name).is_none() {
+                errors.push(ConfigError::MissingField {
+                    path: suffix_to_path(var_name, &self.separator),
+                    source_location: Some(SourceLocation::env(&full_name)),
+                    searched_sources: vec!["environment".to_string()],
+                });
+            }
+        }
+
+        // If any required vars are missing, fail with all errors accumulated
+        if !errors.is_empty() {
+            return Err(ConfigErrors::from_vec(errors).expect("errors vec is not empty"));
+        }
+
         let mut values = ConfigValues::empty();
         let prefix_for_comparison = if self.case_sensitive {
             self.prefix.clone()
@@ -797,5 +867,147 @@ mod tests {
         assert_eq!(hosts[0].as_str(), Some("host1"));
         assert_eq!(hosts[1].as_str(), Some("host2"));
         assert_eq!(hosts[2].as_str(), Some("host3"));
+    }
+
+    #[test]
+    fn test_require_single_var_present() {
+        let env = MockEnv::new().with_env("APP_JWT_SECRET", "secret123");
+
+        let source = Env::prefix("APP_").require("JWT_SECRET");
+        let result = source.load(&env);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_require_single_var_missing() {
+        let env = MockEnv::new(); // Empty
+
+        let source = Env::prefix("APP_").require("JWT_SECRET");
+        let result = source.load(&env);
+
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert_eq!(errors.len(), 1);
+
+        // Check that error mentions the full env var name
+        let error = errors.first();
+        if let Some(source_loc) = error.source_location() {
+            assert_eq!(source_loc.source, "env:APP_JWT_SECRET");
+        } else {
+            panic!("Expected source location");
+        }
+    }
+
+    #[test]
+    fn test_require_all_present() {
+        let env = MockEnv::new()
+            .with_env("APP_JWT_SECRET", "secret")
+            .with_env("APP_DATABASE_URL", "postgresql://localhost/db")
+            .with_env("APP_API_KEY", "key123");
+
+        let source = Env::prefix("APP_").require_all(&["JWT_SECRET", "DATABASE_URL", "API_KEY"]);
+        let result = source.load(&env);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_require_all_accumulates_errors() {
+        let env = MockEnv::new().with_env("APP_JWT_SECRET", "secret");
+        // Missing DATABASE_URL and API_KEY
+
+        let source = Env::prefix("APP_").require_all(&["JWT_SECRET", "DATABASE_URL", "API_KEY"]);
+        let result = source.load(&env);
+
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        // Should have 2 errors (DATABASE_URL and API_KEY missing)
+        assert_eq!(errors.len(), 2);
+
+        // Check that both missing vars are in the errors
+        let error_sources: Vec<_> = errors
+            .iter()
+            .filter_map(|e| e.source_location().map(|sl| sl.source.as_str()))
+            .collect();
+        assert!(error_sources.contains(&"env:APP_DATABASE_URL"));
+        assert!(error_sources.contains(&"env:APP_API_KEY"));
+    }
+
+    #[test]
+    fn test_require_with_empty_prefix() {
+        let env = MockEnv::new().with_env("DATABASE_URL", "postgresql://localhost/db");
+
+        let source = Env::all().require("DATABASE_URL");
+        let result = source.load(&env);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_require_with_empty_prefix_missing() {
+        let env = MockEnv::new(); // Empty
+
+        let source = Env::all().require("DATABASE_URL");
+        let result = source.load(&env);
+
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert_eq!(errors.len(), 1);
+
+        // Check that error shows env var without prefix
+        let error = errors.first();
+        if let Some(source_loc) = error.source_location() {
+            assert_eq!(source_loc.source, "env:DATABASE_URL");
+        } else {
+            panic!("Expected source location");
+        }
+    }
+
+    #[test]
+    fn test_require_partial_missing() {
+        let env = MockEnv::new()
+            .with_env("APP_HOST", "localhost")
+            .with_env("APP_PORT", "8080");
+        // Missing JWT_SECRET
+
+        let source = Env::prefix("APP_").require("JWT_SECRET");
+        let result = source.load(&env);
+
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert_eq!(errors.len(), 1);
+
+        // Even though other vars are present, we should fail on missing JWT_SECRET
+        let error = errors.first();
+        if let Some(source_loc) = error.source_location() {
+            assert_eq!(source_loc.source, "env:APP_JWT_SECRET");
+        } else {
+            panic!("Expected source location");
+        }
+    }
+
+    #[test]
+    fn test_require_does_not_affect_normal_loading() {
+        let env = MockEnv::new()
+            .with_env("APP_JWT_SECRET", "secret123")
+            .with_env("APP_HOST", "localhost")
+            .with_env("APP_PORT", "8080");
+
+        let source = Env::prefix("APP_").require("JWT_SECRET");
+        let values = source.load(&env).expect("should load successfully");
+
+        // Required var should be loaded
+        assert_eq!(
+            values.get("jwt.secret").map(|v| v.value.as_str()),
+            Some(Some("secret123"))
+        );
+
+        // Other vars should also be loaded normally
+        assert_eq!(
+            values.get("host").map(|v| v.value.as_str()),
+            Some(Some("localhost"))
+        );
+        assert_eq!(
+            values.get("port").map(|v| v.value.as_integer()),
+            Some(Some(8080))
+        );
     }
 }
