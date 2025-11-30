@@ -15,6 +15,7 @@ use serde::Deserialize;
 mod manual {
     use super::*;
 
+    #[allow(dead_code)]
     pub struct Config {
         pub jwt_secret: String,
         pub database_url: String,
@@ -28,6 +29,7 @@ mod manual {
         pub api_key: String,
     }
 
+    #[allow(dead_code)]
     #[derive(Debug)]
     pub struct ConfigError(String);
 
@@ -101,6 +103,7 @@ mod manual {
 // Declarative Validation (New Approach)
 // =============================================================================
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, DeriveValidate)]
 struct AppConfig {
     #[validate(min_length(32))]

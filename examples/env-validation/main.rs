@@ -111,6 +111,7 @@ mod before {
 
 /// Modern configuration with declarative source-level required vars
 /// and value-level validation.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, DeriveValidate)]
 struct AppConfig {
     #[validate(min_length(32))]
