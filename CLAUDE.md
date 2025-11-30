@@ -436,6 +436,169 @@ validate_with_predicate(
 - **Zero-cost**: No runtime overhead
 - **Tested**: Stillwater predicates are thoroughly tested with property-based tests
 
+## Environment Variable Validation
+
+Premortem provides ergonomic patterns for marking environment variables as required at the source level, with error accumulation for all missing variables.
+
+### Required Environment Variables
+
+Use `.require()` or `.require_all()` on the `Env` source to declare required environment variables:
+
+```rust
+use premortem::prelude::*;
+
+// Mark individual variables as required
+let config = Config::<AppConfig>::builder()
+    .source(
+        Env::prefix("APP_")
+            .require("JWT_SECRET")
+            .require("DATABASE_URL")
+    )
+    .build()?;
+
+// Or mark multiple variables at once
+let config = Config::<AppConfig>::builder()
+    .source(
+        Env::prefix("APP_")
+            .require_all(&["JWT_SECRET", "DATABASE_URL", "API_KEY"])
+    )
+    .build()?;
+```
+
+**Key features**:
+- Variable names specified WITHOUT prefix (prefix is added automatically)
+- Missing variables cause `load()` to fail with accumulated errors
+- ALL missing variables reported at once (not fail-fast)
+- Error messages include full environment variable name with prefix
+
+### Source-Level vs Value-Level Validation
+
+Premortem separates two concerns:
+
+1. **Source-level validation** (presence checking): Done during `Source::load()`
+   - Use `.require()` on the `Env` source
+   - Checks if environment variables exist
+   - Fails before deserialization if missing
+
+2. **Value-level validation** (constraints): Done after deserialization
+   - Use `#[validate(...)]` attributes or `impl Validate`
+   - Validates the parsed values meet constraints
+   - Runs only if all required variables are present
+
+```rust
+#[derive(Debug, Deserialize, DeriveValidate)]
+struct AppConfig {
+    // Source-level: APP_JWT_SECRET must exist
+    // Value-level: must be at least 32 characters
+    #[validate(min_length(32))]
+    jwt_secret: String,
+
+    // Source-level: APP_DATABASE_URL must exist
+    // No value-level validation
+    database_url: String,
+
+    // Source-level: APP_PORT must exist
+    // Value-level: must be in valid port range
+    #[validate(range(1..=65535))]
+    port: u16,
+}
+
+let config = Config::<AppConfig>::builder()
+    .source(
+        Env::prefix("APP_")
+            .require_all(&["JWT_SECRET", "DATABASE_URL", "PORT"])
+    )
+    .build()?;
+```
+
+### Error Messages
+
+When required environment variables are missing, you get clear error messages:
+
+```
+Configuration error:
+  [env:APP_JWT_SECRET] Missing required field: jwt.secret
+  [env:APP_DATABASE_URL] Missing required field: database.url
+  [env:APP_API_KEY] Missing required field: api.key
+```
+
+All missing variables are reported together, making it easy to fix multiple issues at once.
+
+### Migration from Manual Validation
+
+**Before** (90+ lines of imperative code):
+```rust
+impl Config {
+    pub fn load<E: ConfigEnv>(env: &E) -> Result<Self, ConfigError> {
+        let database_url = env
+            .get_env("APP_DATABASE_URL")
+            .ok_or_else(|| ConfigError("DATABASE_URL is required".to_string()))?;
+
+        let jwt_secret = env
+            .get_env("APP_JWT_SECRET")
+            .ok_or_else(|| ConfigError("JWT_SECRET is required".to_string()))?;
+
+        if jwt_secret.len() < 32 {
+            return Err(ConfigError("JWT_SECRET must be at least 32 characters".to_string()));
+        }
+
+        let github_client_id = env
+            .get_env("APP_GITHUB_CLIENT_ID")
+            .ok_or_else(|| ConfigError("GITHUB_CLIENT_ID is required".to_string()))?;
+
+        // ... 70+ more lines of repetitive code
+    }
+}
+```
+
+**After** (~15 lines of declarative code):
+```rust
+#[derive(Debug, Deserialize, DeriveValidate)]
+struct Config {
+    database_url: String,
+
+    #[validate(min_length(32))]
+    jwt_secret: String,
+
+    github_client_id: String,
+}
+
+let config = Config::<Config>::builder()
+    .source(
+        Env::prefix("APP_")
+            .require_all(&["DATABASE_URL", "JWT_SECRET", "GITHUB_CLIENT_ID"])
+    )
+    .build()?;
+```
+
+### Best Practices
+
+1. **Use `.require_all()` for multiple variables**: More concise than chaining `.require()` calls
+
+2. **Separate presence from validation**:
+   - Source-level: Does the variable exist?
+   - Value-level: Does the value meet constraints?
+
+3. **Test with MockEnv**:
+   ```rust
+   #[test]
+   fn test_missing_required_vars() {
+       let env = MockEnv::new()
+           .with_env("APP_JWT_SECRET", "secret");
+       // Missing DATABASE_URL
+
+       let result = Config::<AppConfig>::builder()
+           .source(Env::prefix("APP_").require_all(&["JWT_SECRET", "DATABASE_URL"]))
+           .build_with_env(&env);
+
+       assert!(result.is_err());
+       let errors = result.unwrap_err();
+       assert_eq!(errors.len(), 1); // One missing variable
+   }
+   ```
+
+4. **Clear error accumulation**: All missing variables are reported at once, helping users fix all issues in one go
+
 ## Common Patterns
 
 ### Custom Validation

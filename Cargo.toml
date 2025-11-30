@@ -34,6 +34,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 proptest = "1.5"
 tempfile = "3.23.0"
+criterion = "0.5"
 
 [features]
 default = ["toml", "derive"]
@@ -54,3 +55,7 @@ required-features = ["watch"]
 name = "yaml"
 path = "examples/yaml/main.rs"
 required-features = ["yaml"]
+
+[[bench]]
+name = "env_validation"
+harness = false
