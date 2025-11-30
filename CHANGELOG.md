@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2025-11-30
+
+### Added
+
+- **Environment Variable Validation Ergonomics** - Declarative required environment variable validation
+  - `.require(var_name)` - Mark a single environment variable as required
+  - `.require_all(&[...])` - Mark multiple environment variables as required at once
+  - Source-level presence validation separate from value-level constraints
+  - Error accumulation for ALL missing required variables (not fail-fast)
+  - Clear error messages with full environment variable names including prefix
+- Environment validation example (`examples/env-validation/`) demonstrating 90+ line reduction
+- Performance benchmarks for environment variable validation (`benches/env_validation.rs`)
+- Integration tests for required environment variables (`tests/env_required_integration.rs`)
+
+### Changed
+
+- Environment source now validates required variables during `load()` before deserialization
+- Environment variable errors include full variable name with prefix for clarity
+
+### Documentation
+
+- Added "Required Environment Variables" section to README
+- Added env-validation example to examples table
+- Documented separation of source-level (presence) vs value-level (constraint) validation
+- Updated CLAUDE.md with comprehensive environment variable validation patterns
+
 ## [0.5.0] - 2025-11-29
 
 ### Added
@@ -120,7 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `serde` 1.0 - Serialization/deserialization
 - `serde_json` 1.0 - JSON support
 
-[Unreleased]: https://github.com/iepathos/premortem/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/iepathos/premortem/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/iepathos/premortem/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/iepathos/premortem/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/iepathos/premortem/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/iepathos/premortem/compare/v0.2.0...v0.3.0

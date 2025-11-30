@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "premortem"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "axum",
  "criterion",

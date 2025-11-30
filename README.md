@@ -92,14 +92,14 @@ fn main() {
 
 ```toml
 [dependencies]
-premortem = "0.3"
+premortem = "0.6"
 ```
 
 With optional features:
 
 ```toml
 [dependencies]
-premortem = { version = "0.3", features = ["json", "watch"] }
+premortem = { version = "0.6", features = ["json", "watch"] }
 ```
 
 ## Feature Flags
@@ -120,6 +120,7 @@ See the [`examples/`](./examples/) directory for runnable examples:
 | Example | Description |
 |---------|-------------|
 | [error-demo](./examples/error-demo/) | Error output with source location tracking |
+| [env-validation](./examples/env-validation/) | Required environment variables with error accumulation |
 | [layered-config](./examples/layered-config/) | Multi-source config with value tracing |
 | [layered](./examples/layered/) | Environment-based layered configuration |
 | [basic](./examples/basic/) | Minimal configuration loading |
@@ -156,6 +157,30 @@ let config = Config::<AppConfig>::builder()
     .source(Env::prefix("APP_"))                   // Highest priority
     .build()?;
 ```
+
+### Required Environment Variables
+
+Mark environment variables as required at the source level with error accumulation:
+
+```rust
+let config = Config::<AppConfig>::builder()
+    .source(
+        Env::prefix("APP_")
+            .require_all(&["JWT_SECRET", "DATABASE_URL", "API_KEY"])
+    )
+    .build()?;
+```
+
+All missing required variables are reported together:
+
+```
+Configuration errors (3):
+  [env:APP_JWT_SECRET] Missing required field: jwt.secret
+  [env:APP_DATABASE_URL] Missing required field: database.url
+  [env:APP_API_KEY] Missing required field: api.key
+```
+
+This separates **presence validation** (does the variable exist?) from **value validation** (does it meet constraints?).
 
 ### Testable I/O
 

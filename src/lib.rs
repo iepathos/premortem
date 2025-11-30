@@ -11,6 +11,7 @@
 //!
 //! - **Error Accumulation**: Find ALL configuration errors, not just the first one
 //! - **Source Layering**: Merge config from files and environment variables
+//! - **Required Variables**: Declarative validation of required environment variables
 //! - **Testable I/O**: Dependency injection via `ConfigEnv` trait
 //! - **Type Safety**: Deserialize into your types with full validation
 //!
@@ -79,6 +80,33 @@
 //! use premortem::prelude::*;
 //! use stillwater::Effect;  // Direct stillwater access
 //! ```
+//!
+//! # Required Environment Variables
+//!
+//! Mark environment variables as required at the source level with error accumulation:
+//!
+//! ```ignore
+//! use premortem::prelude::*;
+//!
+//! let config = Config::<AppConfig>::builder()
+//!     .source(
+//!         Env::prefix("APP_")
+//!             .require_all(&["JWT_SECRET", "DATABASE_URL", "API_KEY"])
+//!     )
+//!     .build()?;
+//! ```
+//!
+//! All missing required variables are reported together:
+//!
+//! ```text
+//! Configuration errors (3):
+//!   [env:APP_JWT_SECRET] Missing required field: jwt.secret
+//!   [env:APP_DATABASE_URL] Missing required field: database.url
+//!   [env:APP_API_KEY] Missing required field: api.key
+//! ```
+//!
+//! This separates **presence validation** (does the variable exist?) from
+//! **value validation** (does it meet constraints?).
 //!
 //! # Architecture
 //!
