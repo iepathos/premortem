@@ -46,9 +46,7 @@ fn test_require_all_with_all_present() {
         .with_env("APP_PORT", "5432");
 
     let result = Config::<TestConfig>::builder()
-        .source(
-            Env::prefix("APP_").require_all(&["APIKEY", "DATABASEURL", "PORT"]),
-        )
+        .source(Env::prefix("APP_").require_all(&["APIKEY", "DATABASEURL", "PORT"]))
         .build_with_env(&env);
 
     assert!(result.is_ok());
@@ -81,14 +79,11 @@ fn test_single_required_var_missing() {
 
 #[test]
 fn test_multiple_required_vars_missing_error_accumulation() {
-    let env = MockEnv::new()
-        .with_env("APP_PORT", "5432");
+    let env = MockEnv::new().with_env("APP_PORT", "5432");
     // Missing APP_APIKEY and APP_DATABASEURL
 
     let result = Config::<TestConfig>::builder()
-        .source(
-            Env::prefix("APP_").require_all(&["APIKEY", "DATABASEURL", "PORT"]),
-        )
+        .source(Env::prefix("APP_").require_all(&["APIKEY", "DATABASEURL", "PORT"]))
         .build_with_env(&env);
 
     assert!(result.is_err());
@@ -108,9 +103,7 @@ fn test_all_required_vars_missing() {
     // No environment variables set
 
     let result = Config::<TestConfig>::builder()
-        .source(
-            Env::prefix("APP_").require_all(&["APIKEY", "DATABASEURL", "PORT"]),
-        )
+        .source(Env::prefix("APP_").require_all(&["APIKEY", "DATABASEURL", "PORT"]))
         .build_with_env(&env);
 
     assert!(result.is_err());
@@ -128,9 +121,7 @@ fn test_required_vars_present_but_validation_fails() {
         .with_env("APP_PORT", "8080");
 
     let result = Config::<TestConfig>::builder()
-        .source(
-            Env::prefix("APP_").require_all(&["APIKEY", "DATABASEURL", "PORT"]),
-        )
+        .source(Env::prefix("APP_").require_all(&["APIKEY", "DATABASEURL", "PORT"]))
         .build_with_env(&env);
 
     assert!(result.is_err());
@@ -198,9 +189,7 @@ fn test_require_var_not_in_prefix() {
         .with_env("APP_PORT", "5432");
 
     let result = Config::<TestConfig>::builder()
-        .source(
-            Env::prefix("APP_").require_all(&["APIKEY", "DATABASEURL", "PORT"]),
-        )
+        .source(Env::prefix("APP_").require_all(&["APIKEY", "DATABASEURL", "PORT"]))
         .build_with_env(&env);
 
     assert!(result.is_err());

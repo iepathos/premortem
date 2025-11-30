@@ -67,9 +67,7 @@ mod manual {
                 .get_env("APP_SMTPPORT")
                 .ok_or_else(|| ConfigError("APP_SMTPPORT is required".to_string()))?
                 .parse::<u16>()
-                .map_err(|_| {
-                    ConfigError("APP_SMTPPORT must be a valid port number".to_string())
-                })?;
+                .map_err(|_| ConfigError("APP_SMTPPORT must be a valid port number".to_string()))?;
 
             let smtp_username = env
                 .get_env("APP_SMTPUSERNAME")
