@@ -892,7 +892,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "toml",
- "toml_edit",
+ "toml_edit 0.23.9",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1377,6 +1377,7 @@ dependencies = [
  "serde_core",
  "serde_spanned",
  "toml_datetime 0.7.3",
+ "toml_edit 0.22.27",
  "toml_parser",
  "toml_writer",
  "winnow",
@@ -1398,14 +1399,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml_datetime"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2cdb639ebbc97961c51720f858597f7f24c4fc295327923af55b74c3c724533"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "toml_edit"
 version = "0.22.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
 dependencies = [
  "indexmap",
+ "serde",
+ "serde_spanned",
  "toml_datetime 0.6.11",
  "toml_write",
+ "winnow",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.23.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d7cbc3b4b49633d57a0509303158ca50de80ae32c265093b24c414705807832"
+dependencies = [
+ "indexmap",
+ "toml_datetime 0.7.3",
+ "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
