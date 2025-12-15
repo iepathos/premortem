@@ -4,10 +4,10 @@
 //! source-level validation to verify <5% overhead requirement.
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::hint::black_box;
 use premortem::env::{ConfigEnv, MockEnv};
 use premortem::prelude::*;
 use serde::Deserialize;
+use std::hint::black_box;
 
 // =============================================================================
 // Manual Validation (Baseline)
