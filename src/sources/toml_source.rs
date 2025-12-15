@@ -30,7 +30,7 @@
 
 use std::path::PathBuf;
 
-use toml_edit::{ImDocument, Item};
+use toml_edit::{Document, Item};
 
 use crate::env::ConfigEnv;
 use crate::error::{ConfigError, ConfigErrors, SourceErrorKind, SourceLocation};
@@ -227,11 +227,11 @@ impl Source for Toml {
 
 /// Pure function: parse TOML content into ConfigValues.
 /// No I/O - this runs after the Effect has read the file.
-/// Uses toml_edit's ImDocument to capture line numbers for each value.
+/// Uses toml_edit's Document to capture line numbers for each value.
 fn parse_toml(content: &str, source_name: &str) -> Result<ConfigValues, ConfigErrors> {
-    // Use ImDocument to preserve span information (DocumentMut loses span info)
-    let document: ImDocument<&str> =
-        ImDocument::parse(content).map_err(|e: toml_edit::TomlError| {
+    // Use Document (immutable) to preserve span information
+    let document: Document<&str> =
+        Document::parse(content).map_err(|e: toml_edit::TomlError| {
             // Extract line/column from the parse error
             let span = e.span();
             let (line, column) = span
