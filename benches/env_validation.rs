@@ -3,7 +3,8 @@
 //! Compares manual imperative validation (90+ lines) vs declarative
 //! source-level validation to verify <5% overhead requirement.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 use premortem::env::{ConfigEnv, MockEnv};
 use premortem::prelude::*;
 use serde::Deserialize;
