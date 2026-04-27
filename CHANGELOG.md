@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-04-27
+
+### Changed
+
+- Updated `regex` dependency from 1.10 to 1.12
+- Updated `tempfile` dev-dependency from 3.23.0 to 3.24.0
+- Refreshed `Cargo.lock` with dependency updates
+
+### CI
+
+- Updated `actions/upload-artifact` from v6 to v7
+
 ## [0.6.1] - 2025-12-14
 
 ### Fixed
@@ -164,7 +176,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `serde` 1.0 - Serialization/deserialization
 - `serde_json` 1.0 - JSON support
 
-[Unreleased]: https://github.com/iepathos/premortem/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/iepathos/premortem/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/iepathos/premortem/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/iepathos/premortem/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/iepathos/premortem/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/iepathos/premortem/compare/v0.4.0...v0.5.0
