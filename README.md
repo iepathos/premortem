@@ -2,8 +2,8 @@
 
 > Know how your app will die—before it does.
 
-[![Crates.io](https://img.shields.io/crates/v/premortem.svg)](https://crates.io/crates/premortem)
-[![Downloads](https://img.shields.io/crates/d/premortem)](https://crates.io/crates/premortem)
+[![Crates.io](https://badgen.net/crates/v/premortem)](https://crates.io/crates/premortem)
+[![Downloads](https://badgen.net/crates/d/premortem)](https://crates.io/crates/premortem)
 [![CI](https://github.com/iepathos/premortem/actions/workflows/ci.yml/badge.svg)](https://github.com/iepathos/premortem/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT)](LICENSE)
 
