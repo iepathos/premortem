@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated `actions/checkout` from v6 to v7
 - Updated `actions/cache` from v5 to v6
+- Installed `cargo-audit` with locked dependencies for Rust compatibility
 
 ## [0.6.3] - 2026-06-18
 
