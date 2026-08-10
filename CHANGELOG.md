@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated `regex` dependency from 1.12.4 to 1.13.1
+- Updated `serde` dependency from 1.0.228 to 1.0.229
+- Updated `serde_json` dependency from 1.0.150 to 1.0.151
+- Updated `tokio` dev-dependency from 1.52.3 to 1.53.1
+- Updated `syn` dependency from 2.0.118 to 2.0.119 in `premortem-derive`
+- Updated `quote` dependency from 1.0.45 to 1.0.47 in `premortem-derive`
+- Updated `proc-macro2` dependency from 1.0.106 to 1.0.107 in `premortem-derive`
+- Refreshed `Cargo.lock` with latest compatible transitive dependency updates
+
+### CI
+
+- Updated `actions/checkout` from v6 to v7
+- Updated `actions/cache` from v5 to v6
+
 ## [0.6.3] - 2026-06-18
 
 ### Changed
