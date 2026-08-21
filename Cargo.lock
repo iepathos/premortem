@@ -1214,9 +1214,9 @@ dependencies = [
 
 [[package]]
 name = "stillwater"
-version = "0.13.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80e43e8d97599702b745d8501a49ac76069ede74666d5883554b79b37f99a951"
+checksum = "9a260cb13353b5e641c610f631cb21a638e4c44f837fe1f713fb3ba5bcd3b99e"
 dependencies = [
  "futures",
 ]

@@ -278,7 +278,7 @@ fn fail(error: ConfigError) -> ConfigValidation<()> {
 }
 
 // ============================================================================
-// Predicate-Validator Bridge (stillwater 0.13.0+)
+// Predicate-Validator Bridge
 // ============================================================================
 
 use stillwater::predicate::Predicate;
@@ -1991,7 +1991,7 @@ mod tests {
     }
 
     // ========================================================================
-    // Predicate Bridge Tests (stillwater 0.13.0+)
+    // Predicate Bridge Tests
     // ========================================================================
 
     use stillwater::predicate::prelude::*;

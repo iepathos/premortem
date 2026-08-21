@@ -190,7 +190,7 @@ pub use watch::{ConfigEvent, ConfigWatcher, WatchedConfig};
 // Re-export stillwater types that are commonly used
 pub use stillwater::{NonEmptyVec, Semigroup, Validation};
 
-// Re-export stillwater predicate module and types (0.13.0+)
+// Re-export stillwater predicate module and types
 pub use stillwater::predicate::{self, Predicate, PredicateExt};
 
 // Re-export derive macro when the feature is enabled

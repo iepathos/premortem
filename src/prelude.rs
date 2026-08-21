@@ -96,7 +96,7 @@ pub use stillwater::Semigroup;
 /// preventing "empty error list" bugs.
 pub use stillwater::NonEmptyVec;
 
-// Re-export stillwater predicates for composable validation (stillwater 0.13.0+)
+// Re-export stillwater predicates for composable validation
 pub use stillwater::predicate::prelude::*;
 
 // ============================================================================
@@ -218,12 +218,12 @@ pub use crate::validate::custom;
 pub use crate::validate::When;
 
 // ============================================================================
-// Predicate-Validator Bridge (stillwater 0.13.0+)
+// Predicate-Validator Bridge
 // ============================================================================
 
 /// Convert a stillwater predicate into a premortem validator.
 ///
-/// This enables using composable predicates from stillwater 0.13.0+ within
+/// This enables using composable predicates from stillwater within
 /// premortem's validation framework.
 ///
 /// # Example

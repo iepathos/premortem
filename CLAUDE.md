@@ -284,7 +284,7 @@ pub use stillwater::{NonEmptyVec, Semigroup, Validation};
 
 ## Validation with Predicates
 
-Premortem integrates with stillwater 0.13's composable predicates for elegant, reusable validation logic.
+Premortem integrates with stillwater's composable predicates for elegant, reusable validation logic.
 
 ### Basic Usage
 
