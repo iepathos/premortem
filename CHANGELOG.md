@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated `stillwater` dependency from 0.13.0 to 1.1.1
+- Refreshed `Cargo.lock` with latest compatible transitive dependency updates
 
 ## [0.6.4] - 2026-08-09
 
